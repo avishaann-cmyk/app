@@ -18,6 +18,8 @@ COPY . .
 
 # Build application
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ARG REACT_APP_BACKEND_URL=https://capeembercoffee.co.za
+ENV REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL}
 RUN yarn build:prerender || yarn build
 
 # Production stage
