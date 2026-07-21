@@ -19,6 +19,17 @@ class DummyOrderCollection:
         return None
 
 
+def _set_payfast_env(monkeypatch, sandbox=False):
+    monkeypatch.setenv("PAYFAST_ENABLED", "true")
+    monkeypatch.setenv("PAYFAST_SANDBOX", "true" if sandbox else "false")
+    monkeypatch.setenv("PAYFAST_MERCHANT_ID", "34064005")
+    monkeypatch.setenv("PAYFAST_MERCHANT_KEY", "nfvifv037umoe")
+    monkeypatch.setenv("PAYFAST_PASSPHRASE", "Taegan123456")
+    monkeypatch.setenv("PAYFAST_SANDBOX_MERCHANT_ID", "10000100")
+    monkeypatch.setenv("PAYFAST_SANDBOX_MERCHANT_KEY", "46f0cd694581a")
+    monkeypatch.setenv("PAYFAST_SANDBOX_PASSPHRASE", "sandbox-pass")
+
+
 class TestPayfastSignature:
     def test_generate_signature_matches_payfast_documented_python_example(self):
         data = {
@@ -35,7 +46,7 @@ class TestPayfastSignature:
         assert signature == "f74a321292f7a839c770d42868e21db1"
 
     def test_generate_payfast_signature_uses_passphrase_but_does_not_return_it(self, monkeypatch):
-        monkeypatch.setattr(server, "PAYFAST_PASSPHRASE", "Taegan123456")
+        _set_payfast_env(monkeypatch, sandbox=False)
         data = {
             "merchant_id": "34064005",
             "merchant_key": "nfvifv037umoe",
@@ -56,7 +67,7 @@ class TestPayfastSignature:
         assert signature == server.generate_payfast_signature(data)
 
     def test_create_payfast_payment_route_returns_signed_fields_without_passphrase(self, monkeypatch):
-        monkeypatch.setattr(server, "PAYFAST_PASSPHRASE", "Taegan123456")
+        _set_payfast_env(monkeypatch, sandbox=False)
 
         user = {
             "_id": "user-1",

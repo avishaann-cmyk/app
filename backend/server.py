@@ -77,13 +77,6 @@ JWT_EXPIRATION_HOURS = 24
 REFRESH_TOKEN_DAYS = 30
 
 # PayFast
-PAYFAST_MERCHANT_ID = _get_env_stripped('PAYFAST_MERCHANT_ID', '10000100')
-PAYFAST_MERCHANT_KEY = _get_env_stripped('PAYFAST_MERCHANT_KEY', '46f0cd694581a')
-PAYFAST_PASSPHRASE = _get_env_stripped('PAYFAST_PASSPHRASE', '')
-PAYFAST_SANDBOX_MERCHANT_ID = _get_env_stripped('PAYFAST_SANDBOX_MERCHANT_ID', '')
-PAYFAST_SANDBOX_MERCHANT_KEY = _get_env_stripped('PAYFAST_SANDBOX_MERCHANT_KEY', '')
-PAYFAST_SANDBOX_PASSPHRASE = _get_env_stripped('PAYFAST_SANDBOX_PASSPHRASE', '')
-PAYFAST_SANDBOX = _get_env_bool('PAYFAST_SANDBOX', False)
 PAYFAST_DEBUG = _get_env_bool('PAYFAST_DEBUG', False)
 
 # Email (placeholder for SendGrid/Resend)
@@ -1024,36 +1017,23 @@ def generate_payfast_signature(data: Dict[str, str], passphrase: Optional[str] =
     signature = hashlib.md5(param_string.encode("utf-8")).hexdigest()
     
     if PAYFAST_DEBUG:
-        logger.info("="*80)
-        logger.info("PayFast Signature Generation Debug:")
-        logger.info("Fields (before URL encoding): %s", [k for k, v in data.items() if k != "signature" and v not in (None, "")])
-        logger.info(f"Full param string: {param_string}")
-        logger.info(f"Calculated signature: {signature}")
-        logger.info("="*80)
+        # Never log canonical signature payloads to avoid leaking sensitive values.
+        logger.info("PayFast signature debug: field_count=%s has_passphrase=%s signature=%s", len(payload_parts), bool(effective_passphrase), signature)
     return signature
 
 
 async def verify_payfast_itn(request: Request) -> bool:
-    """Verify PayFast ITN request signature and merchant identity."""
+    """Verify PayFast ITN request using the same canonical payload validator as webhook route."""
     form_data = await request.form()
-    data = dict(form_data)
+    data = {k: str(v).strip() for k, v in dict(form_data).items()}
 
     if not data:
         logger.warning("PayFast ITN: empty payload")
         return False
 
-    credentials = get_payfast_credentials()
-
-    received_merchant_id = str(data.get("merchant_id", "")).strip()
-    received_merchant_key = str(data.get("merchant_key", "")).strip()
-    if received_merchant_id != credentials["merchant_id"] or received_merchant_key != credentials["merchant_key"]:
-        logger.warning("PayFast ITN: merchant mismatch")
-        return False
-
-    received_sig = str(data.pop("signature", "")).strip().lower()
-    expected_sig = generate_payfast_signature(data, credentials["passphrase"]).strip().lower()
-    if not received_sig or received_sig != expected_sig:
-        logger.warning("PayFast ITN: invalid signature")
+    validation = validate_payfast_itn_payload(data)
+    if not validation["valid"]:
+        logger.warning("PayFast ITN validation failed: reason=%s", validation.get("reason_code"))
         return False
 
     return True
@@ -1065,6 +1045,7 @@ def validate_payfast_itn_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         "payment_status",
         "amount_gross",
         "merchant_id",
+        "merchant_key",
         "signature",
     ]
     missing_fields = [field for field in required_fields if not str(data.get(field, "")).strip()]

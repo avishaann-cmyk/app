@@ -246,6 +246,11 @@ System is conditionally ready for hosted sandbox payment once valid sandbox Merc
   - `rtTZUqxcQ4HHrU373oq-n1pWM7qgcHJKnh1fJBFnTuRCnWSZu-QsFQ==`
 - Exact client-side failure timestamp for that specific 403 was not available in captured logs/HAR at audit time.
 
+Additional user-reported CloudFront failure:
+- Request ID: `jRITDhdO7UfDxdU3EuRSZM2V7G8SXZaPX2qMoMIgfPL0okXK76GsfA==`
+- Observed banner text: `The request could not be satisfied. Request blocked.`
+- Runtime context check at audit time showed checkout service in production mode (`process_host=www.payfast.co.za`), which is fronted by CloudFront on live PayFast routes.
+
 ### Comparison Scope
 
 - Previous attempt (captured): PayFast Engine HTTP 400 (`invalid signature` family).
