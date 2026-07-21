@@ -108,10 +108,12 @@ const CheckoutPage = () => {
 
   const validateStep1 = () => {
     if (!isAuthenticated && !guestCheckout) {
+      trackEvent('checkout_validation_error', { step: 1, field: 'guest_checkout', reason: 'guest option not selected' });
       return false;
     }
     if (guestCheckout && (!guestEmail || !guestEmail.includes('@'))) {
       setError('Please enter a valid email address');
+      trackEvent('checkout_validation_error', { step: 1, field: 'email', reason: 'invalid_email' });
       return false;
     }
     return true;
@@ -122,6 +124,7 @@ const CheckoutPage = () => {
     for (const field of required) {
       if (!address[field]) {
         setError(`Please fill in ${field.replace('_', ' ')}`);
+        trackEvent('checkout_validation_error', { step: 2, field, reason: 'required_field_missing' });
         return false;
       }
     }
@@ -138,6 +141,11 @@ const CheckoutPage = () => {
         city: address.city,
         province: address.province,
         is_sedgefield: isSedgefieldLocation(`${address.city} ${address.province}`),
+      });
+      trackEvent('shipping_rule_applied', {
+        city: address.city,
+        province: address.province,
+        rule: isSedgefieldLocation(`${address.city} ${address.province}`) ? 'sedgefield_local_delivery' : 'standard_or_threshold',
       });
       if (isSedgefieldLocation(`${address.city} ${address.province}`)) {
         trackEvent('sedgefield_free_delivery_applied', { city: address.city });
@@ -167,6 +175,9 @@ const CheckoutPage = () => {
         : { 'X-Session-ID': getSessionId() };
 
       // Track payment method selection
+      trackEvent('payment_provider_selected', {
+        provider: 'payfast',
+      });
       trackEvent('add_payment_info', {
         payment_type: 'payfast',
         items_count: cart.items?.length || 0,
@@ -193,17 +204,24 @@ const CheckoutPage = () => {
       const checkoutRes = await axios.post(`${API}/checkout`, checkoutPayload, { headers });
       const { payment, total: payableTotal, order_id } = checkoutRes.data;
 
-      if (!payment || payment.method !== 'payfast' || !payment.host || !payment.fields) {
-        throw new Error('Unexpected payment response');
-      }
-
       // Keep order reference available for post-payment success handling.
       localStorage.setItem('order_id', order_id);
+
+      if (payment?.fields?.return_url?.includes('status_token=')) {
+        const token = payment.fields.return_url.split('status_token=')[1]?.split('&')[0];
+        if (token) {
+          localStorage.setItem(`order_status_token_${order_id}`, decodeURIComponent(token));
+        }
+      }
+
+      if (!payment || payment.method !== 'payfast' || !payment.fields) {
+        throw new Error('Unexpected payment response');
+      }
 
       // Create and submit PayFast form
       const form = document.createElement('form');
       form.method = 'POST';
-      form.action = `https://${payment.host}/eng/process`;
+      form.action = payment.action_url || `https://${payment.host}/eng/process`;
 
       Object.entries(payment.fields).forEach(([key, value]) => {
         const input = document.createElement('input');
@@ -628,23 +646,26 @@ const CheckoutPage = () => {
                 <div className="p-6 bg-white border border-[#E6DCD1]">
                   <h3 className="font-medium text-[#2C1A12] mb-4 flex items-center gap-2">
                     <CreditCard size={20} className="text-[#D05C23]" />
-                    Payment Method
+                    Choose a secure payment method
                   </h3>
-                  <div className="p-4 border border-[#D05C23] bg-[#D05C23]/5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-white border border-[#E6DCD1] flex items-center justify-center">
-                        <CreditCard size={20} className="text-[#2C1A12]" />
-                      </div>
-                      <div>
-                        <span className="font-medium text-[#2C1A12]">PayFast</span>
-                        <p className="text-xs text-[#6B5048]">Credit Card, Debit Card, EFT, Instant EFT</p>
+                  <div className="space-y-3">
+                    <div className="w-full text-left p-4 border border-[#D05C23] bg-[#D05C23]/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white border border-[#E6DCD1] flex items-center justify-center">
+                          <CreditCard size={20} className="text-[#2C1A12]" />
+                        </div>
+                        <div>
+                          <span className="font-medium text-[#2C1A12]">PayFast</span>
+                          <p className="text-xs text-[#6B5048]">Pay securely by card, Instant EFT or another enabled PayFast method.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                  <p className="text-xs text-[#6B5048] mt-3 flex items-center gap-1">
-                    <Lock size={14} />
-                    Your payment information is processed securely via PayFast.
-                  </p>
+                  <div className="text-xs text-[#6B5048] mt-3 space-y-1">
+                    <p className="flex items-center gap-1"><Lock size={14} /> Secure encrypted checkout</p>
+                    <p>Payment processed by the selected provider</p>
+                    <p>Order support from Cape Ember</p>
+                  </div>
                 </div>
 
                 {/* Place Order Button */}
@@ -659,7 +680,7 @@ const CheckoutPage = () => {
                   ) : (
                     <>
                       <Lock size={20} />
-                      Pay R {total.toFixed(2)}
+                      Pay securely - R {total.toFixed(2)}
                     </>
                   )}
                 </button>

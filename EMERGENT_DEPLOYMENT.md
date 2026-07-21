@@ -115,7 +115,6 @@ Replace `YOUR_EMERGENT_GIT_URL` with your actual repository URL.
 2. **Setup Secrets in Emergent** (if using CI/CD):
    - `MONGO_PASSWORD`
    - `PAYFAST_MERCHANT_ID` / `PAYFAST_MERCHANT_KEY`
-   - `STITCH_CLIENT_ID` / `STITCH_CLIENT_SECRET`
    - `RESEND_API_KEY`
    - `JWT_SECRET`
 

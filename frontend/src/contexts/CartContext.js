@@ -99,6 +99,10 @@ export const CartProvider = ({ children }) => {
       await axios.delete(`${API}/cart/items/${encodeURIComponent(itemId)}`, {
         headers: getAuthHeaders()
       });
+      await trackEvent('remove_from_cart', {
+        product_id: productId,
+        variant_id: variantId,
+      });
       await fetchCart();
     } catch (error) {
       console.error('Failed to remove from cart:', error);

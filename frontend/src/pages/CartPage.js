@@ -118,7 +118,7 @@ const CartPage = () => {
   };
 
   // Use centralized totals computation so cart + checkout cannot diverge
-  const { subtotal, discount, shipping: shippingCost, vat: vatAmount, total } = computeCartTotals(cart, cartRules);
+  const { subtotal, discount, shipping: shippingCost, total } = computeCartTotals(cart, cartRules);
   const freeShippingThreshold = Number(cartRules.freeShippingThreshold || 0);
   const amountToFreeShipping = freeShippingThreshold - subtotal;
   const progressToFreeShipping = freeShippingThreshold > 0
@@ -363,15 +363,11 @@ const CartPage = () => {
                   </span>
                 </div>
                 
-                <div className="flex justify-between text-[#6B5048] text-sm">
-                  <span>VAT Included in Total</span>
-                  <span>R {vatAmount.toFixed(2)}</span>
-                </div>
-                
                 <div className="border-t border-[#E6DCD1] pt-4 flex justify-between font-heading text-2xl text-[#2C1A12]">
                   <span>Final Total</span>
                   <span>R {total.toFixed(2)}</span>
                 </div>
+                <p className="text-xs text-[#6B5048] text-right">VAT included in displayed prices.</p>
               </div>
 
               <Link 

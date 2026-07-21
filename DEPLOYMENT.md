@@ -97,7 +97,6 @@ vim .env.production
 # - MONGO_USER: MongoDB username
 # - JWT_SECRET: Generate with: openssl rand -base64 32
 # - PAYFAST_MERCHANT_ID & PAYFAST_MERCHANT_KEY: From PayFast merchant account
-# - STITCH credentials: From Stitch Money dashboard
 # - RESEND_API_KEY: Email service API key
 ```
 
@@ -265,7 +264,7 @@ docker-compose -f docker-compose.prod.yml up -d --scale frontend=2
 docker-compose -f docker-compose.prod.yml logs
 
 # Verify environment variables
-docker exec cape-ember-backend-prod env | grep -E '^(MONGO|PAYFAST|STITCH)'
+docker exec cape-ember-backend-prod env | grep -E '^(MONGO|PAYFAST)'
 
 # Recreate containers
 docker-compose -f docker-compose.prod.yml down -v

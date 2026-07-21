@@ -92,7 +92,6 @@ Your application is now fully configured for production deployment. This documen
 ```
 MONGO_URL               MongoDB connection string
 PAYFAST_*              Payment gateway credentials
-STITCH_*               Alternative payment processor
 RESEND_API_KEY         Email service API key
 JWT_SECRET             API authentication secret
 CORS_ORIGINS           Allowed origins

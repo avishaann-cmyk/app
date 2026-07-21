@@ -37,11 +37,15 @@
   `https://capeembercoffee.co.za/api/webhooks/payfast`
 - [ ] Confirm the URL is publicly reachable (not behind a VPN or local dev server)
 - [ ] Use the PayFast ITN test tool in the dashboard to send a test notification
+- [ ] Confirm deployment env uses backend public URL variable consumed by server (BACKEND_URL precedence)
+- [ ] Verify firewall/reverse proxy allows PayFast POST requests to webhook path
 
 ## 7. Merchant Credentials
 - [ ] Confirm your **Merchant ID** and **Merchant Key** in Integration Settings match what is in your backend `.env`
 - [ ] Confirm your **Passphrase** (if set) matches `PAYFAST_PASSPHRASE` in your backend `.env`
+- [ ] If `PAYFAST_SANDBOX=true`, confirm the deployment uses sandbox-specific credentials (`PAYFAST_SANDBOX_MERCHANT_ID`, `PAYFAST_SANDBOX_MERCHANT_KEY`, `PAYFAST_SANDBOX_PASSPHRASE`) rather than live values
 - [ ] Never share or commit these credentials to a public repository
+- [ ] Confirm credentials are stored in runtime secrets store and not hardcoded in image or repository
 
 ## 8. Account Limits
 - [ ] Check if there are any transaction amount limits on your account
@@ -53,6 +57,13 @@ If payouts are confirmed as COMPLETE on PayFast but funds are not arriving in yo
 - Contact: support@payfast.co.za
 - Reference your merchant ID and the specific transaction IDs
 - Ask for a payout trace for the specific settlement dates
+
+## 10. Integration-Specific Validation
+- [ ] Confirm checkout payload includes merchant_key in PayFast form field set
+- [ ] Confirm m_payment_id sent to PayFast maps to backend order lookup key
+- [ ] Confirm duplicate ITN events do not change order state after first successful processing
+- [ ] Confirm amount mismatch ITN does not mark order paid
+- [ ] Confirm first successful ITN updates both order status and payment attempt status
 
 ---
 

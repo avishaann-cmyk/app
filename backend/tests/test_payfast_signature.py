@@ -20,6 +20,20 @@ class DummyOrderCollection:
 
 
 class TestPayfastSignature:
+    def test_generate_signature_matches_payfast_documented_python_example(self):
+        data = {
+            "merchant_id": "10000100",
+            "merchant_key": "46f0cd694581a",
+            "return_url": "https://www.example.com",
+            "notify_url": "https://www.example.com/notify_url",
+            "m_payment_id": "UniqueId",
+            "amount": "200",
+            "item_name": "test product",
+        }
+
+        signature = server.generate_payfast_signature(data, "jt7NOE43FZPn")
+        assert signature == "f74a321292f7a839c770d42868e21db1"
+
     def test_generate_payfast_signature_uses_passphrase_but_does_not_return_it(self, monkeypatch):
         monkeypatch.setattr(server, "PAYFAST_PASSPHRASE", "Taegan123456")
         data = {

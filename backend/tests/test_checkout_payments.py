@@ -1,10 +1,9 @@
 """
-Cape Ember Coffee - Backend tests for dual payment gateway integration.
+Cape Ember Coffee - Backend tests for PayFast payment integration.
 Covers:
 - /api/auth/login (sanity)
 - /api/orders (create order from cart)
 - /api/payfast/create-payment (PayFast form fields)
-- /api/stitch/create-payment (Stitch redirect URL)
 """
 import os
 import pytest
@@ -15,8 +14,6 @@ API = f"{BASE_URL}/api"
 
 TEST_EMAIL = "testuser2@capeember.co.za"
 TEST_PASSWORD = "Test1234!"
-
-
 # ---------- Fixtures ----------
 
 @pytest.fixture(scope="session")
@@ -88,26 +85,6 @@ class TestCreateOrder:
         # Persist via GET
         pytest.shared_order_id_payfast = data["order_id"]
 
-    def test_create_order_with_stitch(self, auth_headers, seeded_cart):
-        payload = {
-            "shipping_address": {
-                "first_name": "Test",
-                "last_name": "User2",
-                "street": "123 Long Street",
-                "city": "Cape Town",
-                "province": "Western Cape",
-                "postal_code": "8001",
-                "country": "South Africa",
-            },
-            "is_subscription": False,
-            "payment_method": "stitch",
-        }
-        r = requests.post(f"{API}/orders", json=payload, headers=auth_headers, timeout=20)
-        assert r.status_code == 200, r.text
-        data = r.json()
-        assert data["order_id"]
-        pytest.shared_order_id_stitch = data["order_id"]
-
     def test_get_order_persisted(self, auth_headers):
         oid = getattr(pytest, "shared_order_id_payfast", None)
         if not oid:
@@ -117,7 +94,7 @@ class TestCreateOrder:
         data = r.json()
         # _id should NOT leak (mongo object id rule)
         assert "_id" not in data or isinstance(data.get("_id"), str)
-        assert data.get("payment_method") in ("payfast", "stitch")
+        assert data.get("payment_method") == "payfast"
 
 
 # ---------- /api/payfast/create-payment ----------
@@ -155,35 +132,6 @@ class TestPayfastCreatePayment:
         assert r.status_code == 404
 
 
-# ---------- /api/stitch/create-payment ----------
-
-class TestStitchCreatePayment:
-    def test_stitch_returns_redirect_url(self, auth_headers):
-        oid = getattr(pytest, "shared_order_id_stitch", None)
-        if not oid:
-            pytest.skip("requires order")
-        r = requests.post(
-            f"{API}/stitch/create-payment",
-            json={"order_id": oid},
-            headers=auth_headers,
-            timeout=30,
-        )
-        # Stitch is LIVE; this should succeed if credentials are valid, else surface real error
-        assert r.status_code == 200, f"stitch failed: {r.status_code} {r.text}"
-        data = r.json()
-        assert "redirect_url" in data and data["redirect_url"].startswith("http")
-        assert "payment_id" in data and data["payment_id"]
-
-    def test_stitch_order_not_found(self, auth_headers):
-        r = requests.post(
-            f"{API}/stitch/create-payment",
-            json={"order_id": "non-existent-order-id"},
-            headers=auth_headers,
-            timeout=15,
-        )
-        assert r.status_code == 404
-
-
 # ---------- Unauthenticated guards ----------
 
 class TestAuthGuards:
@@ -195,6 +143,3 @@ class TestAuthGuards:
         r = requests.post(f"{API}/payfast/create-payment", json={"order_id": "x"}, timeout=15)
         assert r.status_code == 401
 
-    def test_stitch_requires_auth(self):
-        r = requests.post(f"{API}/stitch/create-payment", json={"order_id": "x"}, timeout=15)
-        assert r.status_code == 401

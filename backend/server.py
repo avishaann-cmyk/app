@@ -1,6 +1,6 @@
 """
 Cape Ember Coffee Co. - Production E-commerce Backend
-Enterprise-grade e-commerce platform with PayFast & Stitch Payments
+Enterprise-grade e-commerce platform with PayFast payments
 """
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, Query, Body, BackgroundTasks, Header
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
@@ -12,17 +12,16 @@ import os
 import json
 import logging
 import secrets
-import hmac
 import hashlib
 import base64
 import re
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, validator
 from typing import List, Optional, Dict, Any, Union
+from abc import ABC, abstractmethod
 import uuid
 from datetime import datetime, timezone, timedelta
 import urllib.parse
-import httpx
 import jwt
 import bcrypt
 from enum import Enum
@@ -36,43 +35,70 @@ load_dotenv(ROOT_DIR / '.env')
 
 # ============ CONFIGURATION ============
 
+TRUE_BOOL_VALUES = {"true", "1", "yes", "on"}
+FALSE_BOOL_VALUES = {"false", "0", "no", "off"}
+
+
+class PayFastConfigurationError(Exception):
+    pass
+
+def _get_env_stripped(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _get_env_bool(name: str, default: bool = False) -> bool:
+    raw_default = "true" if default else "false"
+    return _get_env_stripped(name, raw_default).lower() == "true"
+
+
+def _parse_strict_bool_env(name: str) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        raise PayFastConfigurationError(f"{name} is required")
+
+    value = raw_value.strip().lower()
+    if value in TRUE_BOOL_VALUES:
+        return True
+    if value in FALSE_BOOL_VALUES:
+        return False
+
+    raise PayFastConfigurationError(
+        f"{name} must be one of: true,1,yes,on,false,0,no,off"
+    )
+
 # MongoDB
-MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-DB_NAME = os.environ.get('DB_NAME', 'cape_ember_coffee')
+MONGO_URL = _get_env_stripped('MONGO_URL', 'mongodb://localhost:27017')
+DB_NAME = _get_env_stripped('DB_NAME', 'cape_ember_coffee')
 
 # JWT
-JWT_SECRET = os.environ.get('JWT_SECRET', secrets.token_hex(32))
+JWT_SECRET = _get_env_stripped('JWT_SECRET', secrets.token_hex(32))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 REFRESH_TOKEN_DAYS = 30
 
 # PayFast
-PAYFAST_MERCHANT_ID = os.environ.get('PAYFAST_MERCHANT_ID', '10000100')
-PAYFAST_MERCHANT_KEY = os.environ.get('PAYFAST_MERCHANT_KEY', '46f0cd694581a')
-PAYFAST_PASSPHRASE = os.environ.get('PAYFAST_PASSPHRASE', '')
-PAYFAST_SANDBOX = os.environ.get('PAYFAST_SANDBOX', 'false').lower() == 'true'
-PAYFAST_DEBUG = os.environ.get('PAYFAST_DEBUG', 'false').lower() == 'true'
-
-# Stitch Payments
-STITCH_ENABLED = os.environ.get('STITCH_ENABLED', 'false').lower() == 'true'
-STITCH_CLIENT_ID = os.environ.get('STITCH_CLIENT_ID', '')
-STITCH_CLIENT_SECRET = os.environ.get('STITCH_CLIENT_SECRET', '')
-STITCH_WEBHOOK_SECRET = os.environ.get('STITCH_WEBHOOK_SECRET', '')
-STITCH_SANDBOX = os.environ.get('STITCH_SANDBOX', 'true').lower() == 'true'
-STITCH_PRIVATE_KEY = os.environ.get('STITCH_PRIVATE_KEY', '')
-STITCH_PRIVATE_KEY_PATH = os.environ.get('STITCH_PRIVATE_KEY_PATH', '')
-STITCH_OAUTH_URL = os.environ.get('STITCH_OAUTH_URL', 'https://api.stitch.money/oauth/token')
-STITCH_TOKEN_URL = os.environ.get('STITCH_TOKEN_URL', 'https://secure.stitch.money/connect/token')
-STITCH_SCOPE = os.environ.get('STITCH_SCOPE', 'client_paymentrequest')
+PAYFAST_MERCHANT_ID = _get_env_stripped('PAYFAST_MERCHANT_ID', '10000100')
+PAYFAST_MERCHANT_KEY = _get_env_stripped('PAYFAST_MERCHANT_KEY', '46f0cd694581a')
+PAYFAST_PASSPHRASE = _get_env_stripped('PAYFAST_PASSPHRASE', '')
+PAYFAST_SANDBOX_MERCHANT_ID = _get_env_stripped('PAYFAST_SANDBOX_MERCHANT_ID', '')
+PAYFAST_SANDBOX_MERCHANT_KEY = _get_env_stripped('PAYFAST_SANDBOX_MERCHANT_KEY', '')
+PAYFAST_SANDBOX_PASSPHRASE = _get_env_stripped('PAYFAST_SANDBOX_PASSPHRASE', '')
+PAYFAST_SANDBOX = _get_env_bool('PAYFAST_SANDBOX', False)
+PAYFAST_DEBUG = _get_env_bool('PAYFAST_DEBUG', False)
 
 # Email (placeholder for SendGrid/Resend)
-EMAIL_API_KEY = os.environ.get('EMAIL_API_KEY', '')
-EMAIL_FROM = os.environ.get('EMAIL_FROM', 'orders@capeembercoffee.co.za')
-ADMIN_NOTIFICATION_EMAIL = os.environ.get('ADMIN_NOTIFICATION_EMAIL', 'hello@capeembercoffee.co.za')
+EMAIL_API_KEY = _get_env_stripped('EMAIL_API_KEY', '')
+EMAIL_FROM = _get_env_stripped('EMAIL_FROM', 'orders@capeembercoffee.co.za')
+ADMIN_NOTIFICATION_EMAIL = _get_env_stripped('ADMIN_NOTIFICATION_EMAIL', 'hello@capeembercoffee.co.za')
 
 # URLs
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://capeembercoffee.co.za')
-BACKEND_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://capeembercoffee.co.za')
+FRONTEND_URL = _get_env_stripped('FRONTEND_URL', 'https://capeembercoffee.co.za').rstrip('/')
+BACKEND_URL = _get_env_stripped('BACKEND_URL', _get_env_stripped('REACT_APP_BACKEND_URL', 'https://capeembercoffee.co.za')).rstrip('/')
+
+# Tax configuration defaults (store-level values can override these)
+TAX_REGISTRATION_STATUS = os.environ.get('TAX_REGISTRATION_STATUS', 'registered').strip().lower()
+VAT_NUMBER = os.environ.get('VAT_NUMBER', '').strip()
+PRICES_INCLUDE_TAX = os.environ.get('PRICES_INCLUDE_TAX', 'true').lower() == 'true'
 
 # VAT Rate (South Africa)
 VAT_RATE = 0.15
@@ -104,14 +130,19 @@ logger = logging.getLogger(__name__)
 # ============ ENUMS ============
 
 class OrderStatus(str, Enum):
+    DRAFT = "draft"
     PENDING = "pending"
     PENDING_PAYMENT = "pending_payment"
+    PAYMENT_PROCESSING = "payment_processing"
     PAID = "paid"
+    PAYMENT_FAILED = "payment_failed"
     PROCESSING = "processing"
     SHIPPED = "shipped"
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
+    FULFILLED = "fulfilled"
     REFUNDED = "refunded"
+    PARTIALLY_REFUNDED = "partially_refunded"
 
 class PaymentStatus(str, Enum):
     PENDING = "pending"
@@ -123,10 +154,16 @@ class PaymentStatus(str, Enum):
 
 class PaymentMethod(str, Enum):
     PAYFAST = "payfast"
-    STITCH_CARD = "stitch_card"
-    STITCH_EFT = "stitch_eft"
-    STITCH_APPLE_PAY = "stitch_apple_pay"
-    STITCH_GOOGLE_PAY = "stitch_google_pay"
+
+
+class PaymentAttemptStatus(str, Enum):
+    CREATED = "created"
+    REDIRECTED = "redirected"
+    PENDING = "pending"
+    SUCCESSFUL = "successful"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INVALID_NOTIFICATION = "invalid_notification"
 
 class ProductCategory(str, Enum):
     COFFEE_BEANS = "coffee_beans"
@@ -531,6 +568,157 @@ def is_sedgefield_destination(*parts: Optional[str]) -> bool:
     return bool(re.search(r"\bsedgefield\b", location_text))
 
 
+def normalize_location_token(value: Optional[str]) -> str:
+    raw = str(value or "").strip().lower()
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", raw)
+    collapsed = re.sub(r"\s+", " ", cleaned)
+    return collapsed.strip()
+
+
+def is_free_local_delivery(address: Optional[Dict[str, Any]], alias_list: Optional[List[str]] = None) -> Dict[str, Any]:
+    alias_set = {"sedgefield"}
+    for alias in alias_list or []:
+        token = normalize_location_token(alias)
+        if token:
+            alias_set.add(token)
+
+    address = address or {}
+    city = normalize_location_token(address.get("city"))
+    locality = normalize_location_token(address.get("locality"))
+    suburb = normalize_location_token(address.get("suburb"))
+    province = normalize_location_token(address.get("province"))
+    tokens = [token for token in [city, locality, suburb] if token]
+    matched = next((token for token in tokens if token in alias_set), None)
+
+    if matched:
+        return {
+            "eligible": True,
+            "matched_rule": "sedgefield_local_delivery",
+            "reason": f"matched {matched}",
+            "final_delivery_charge": 0.0,
+            "normalized_city": city,
+            "normalized_province": province,
+        }
+
+    return {
+        "eligible": False,
+        "matched_rule": None,
+        "reason": "city not eligible for local free delivery",
+        "final_delivery_charge": None,
+        "normalized_city": city,
+        "normalized_province": province,
+    }
+
+
+def resolve_tax_config(store_settings: Optional[dict] = None) -> dict:
+    settings = store_settings or {}
+    registration_status = str(settings.get("tax_registration_status") or TAX_REGISTRATION_STATUS or "registered").strip().lower()
+    if registration_status not in {"registered", "not_registered"}:
+        registration_status = "registered"
+
+    vat_rate = float(settings.get("vat_rate", VAT_RATE) or 0)
+    prices_include_tax = bool(settings.get("vat_inclusive_prices", PRICES_INCLUDE_TAX))
+    vat_number = str(settings.get("vat_number") or VAT_NUMBER or "").strip()
+
+    return {
+        "taxRegistrationStatus": registration_status,
+        "taxRate": max(vat_rate, 0.0),
+        "pricesIncludeTax": prices_include_tax,
+        "vatNumber": vat_number or None,
+    }
+
+
+def calculate_vat_components(gross_amount: float, tax_config: dict) -> dict:
+    gross = round(max(float(gross_amount or 0), 0.0), 2)
+    if tax_config.get("taxRegistrationStatus") != "registered":
+        return {"gross": gross, "net": gross, "vat": 0.0}
+
+    tax_rate = max(float(tax_config.get("taxRate") or 0), 0.0)
+    if tax_rate <= 0:
+        return {"gross": gross, "net": gross, "vat": 0.0}
+
+    if tax_config.get("pricesIncludeTax", True):
+        vat = round(gross * tax_rate / (1 + tax_rate), 2)
+        net = round(gross - vat, 2)
+        return {"gross": gross, "net": net, "vat": vat}
+
+    net = gross
+    vat = round(net * tax_rate, 2)
+    gross_with_tax = round(net + vat, 2)
+    return {"gross": gross_with_tax, "net": net, "vat": vat}
+
+
+def resolve_shipping_charge(
+    *,
+    subtotal_after_discount: float,
+    method: ShippingMethod,
+    province: Optional[str],
+    city: Optional[str],
+    postal_code: Optional[str],
+    is_subscription: bool,
+    order_items: List[dict],
+    coupon: Optional[dict],
+    free_shipping_threshold: float,
+    default_shipping_fee: float,
+    sedgefield_aliases: Optional[List[str]] = None,
+) -> dict:
+    base_rate = calculate_shipping(
+        subtotal_after_discount,
+        method,
+        province or "Western Cape",
+        is_subscription,
+        city,
+        free_shipping_threshold,
+        default_shipping_fee,
+    )
+
+    applied_rule = None
+    reason = "standard_zone_rate"
+    waived_amount = 0.0
+    final_rate = float(base_rate)
+
+    if coupon and coupon.get("discount_type") == "free_shipping":
+        applied_rule = "coupon_free_shipping"
+        reason = "valid free-shipping coupon"
+        waived_amount = final_rate
+        final_rate = 0.0
+    elif any(item.get("product_id") == "landscape-bundle" for item in order_items):
+        applied_rule = "landscape_bundle"
+        reason = "bundle qualifies for complimentary delivery"
+        waived_amount = final_rate
+        final_rate = 0.0
+    else:
+        local_result = is_free_local_delivery(
+            {
+                "city": city,
+                "province": province,
+                "postal_code": postal_code,
+            },
+            sedgefield_aliases,
+        )
+        if local_result["eligible"]:
+            applied_rule = "sedgefield_local_delivery"
+            reason = local_result["reason"]
+            waived_amount = final_rate
+            final_rate = 0.0
+        elif subtotal_after_discount >= free_shipping_threshold:
+            applied_rule = "national_threshold"
+            reason = f"subtotal meets threshold {free_shipping_threshold:.2f}"
+            waived_amount = final_rate
+            final_rate = 0.0
+
+    final_rate = round(max(final_rate, 0.0), 2)
+    waived_amount = round(max(min(waived_amount, base_rate), 0.0), 2)
+
+    return {
+        "original_delivery_rate": round(float(base_rate), 2),
+        "waived_amount": waived_amount,
+        "applied_rule": applied_rule,
+        "reason": reason,
+        "final_delivery_rate": final_rate,
+    }
+
+
 async def get_store_rules() -> dict:
     settings = await db.settings.find_one({"_id": "store"}) or {}
 
@@ -634,256 +822,313 @@ def require_admin_roles(allowed_roles: List[str]):
 
 # ============ PAYFAST FUNCTIONS ============
 
+def get_payfast_config() -> Dict[str, Any]:
+    enabled = _parse_strict_bool_env("PAYFAST_ENABLED")
+    sandbox = _parse_strict_bool_env("PAYFAST_SANDBOX")
+
+    if not enabled:
+        return {
+            "enabled": False,
+            "environment": "disabled",
+            "process_host": "",
+            "action_url": "",
+            "merchant_id": "",
+            "merchant_key": "",
+            "passphrase": "",
+            "merchant_id_configured": False,
+            "merchant_key_configured": False,
+            "passphrase_configured": False,
+        }
+
+    if sandbox:
+        merchant_id = _get_env_stripped("PAYFAST_SANDBOX_MERCHANT_ID", "")
+        merchant_key = _get_env_stripped("PAYFAST_SANDBOX_MERCHANT_KEY", "")
+        passphrase = _get_env_stripped("PAYFAST_SANDBOX_PASSPHRASE", "")
+        environment = "sandbox"
+        process_host = "sandbox.payfast.co.za"
+        missing = []
+        if not merchant_id:
+            missing.append("PAYFAST_SANDBOX_MERCHANT_ID")
+        if not merchant_key:
+            missing.append("PAYFAST_SANDBOX_MERCHANT_KEY")
+    else:
+        merchant_id = _get_env_stripped("PAYFAST_MERCHANT_ID", "")
+        merchant_key = _get_env_stripped("PAYFAST_MERCHANT_KEY", "")
+        passphrase = _get_env_stripped("PAYFAST_PASSPHRASE", "")
+        environment = "production"
+        process_host = "www.payfast.co.za"
+        missing = []
+        if not merchant_id:
+            missing.append("PAYFAST_MERCHANT_ID")
+        if not merchant_key:
+            missing.append("PAYFAST_MERCHANT_KEY")
+
+    if missing:
+        raise PayFastConfigurationError(
+            f"PayFast {environment} credentials are incomplete: {', '.join(missing)}"
+        )
+
+    return {
+        "enabled": True,
+        "environment": environment,
+        "process_host": process_host,
+        "action_url": f"https://{process_host}/eng/process",
+        "merchant_id": merchant_id,
+        "merchant_key": merchant_key,
+        "passphrase": passphrase,
+        "merchant_id_configured": bool(merchant_id),
+        "merchant_key_configured": bool(merchant_key),
+        "passphrase_configured": bool(passphrase),
+    }
+
+
 def get_payfast_host() -> str:
-    return "sandbox.payfast.co.za" if PAYFAST_SANDBOX else "www.payfast.co.za"
+    return get_payfast_config()["process_host"]
 
-def generate_payfast_signature(data: Dict[str, str]) -> str:
-    filtered = {k: v for k, v in data.items() if k != "signature" and v is not None and v != ""}
-    sorted_items = sorted(filtered.items())
-    param_string = "&".join([f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in sorted_items])
-    
-    if PAYFAST_PASSPHRASE:
-        param_string += f"&passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE)}"
 
-    signature = hashlib.md5(param_string.encode()).hexdigest()
+class PaymentProvider(ABC):
+    @abstractmethod
+    async def create_checkout(self, order: dict, customer: dict) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def verify_notification(self, request: Request, payload: Dict[str, Any]) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_payment_status(self, reference: str) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def refund_payment(self, payment_id: str, amount: float) -> dict:
+        raise NotImplementedError
+
+
+class PayFastPaymentProvider(PaymentProvider):
+    async def create_checkout(self, order: dict, customer: dict) -> dict:
+        payfast_config = get_payfast_config()
+        if not payfast_config["enabled"]:
+            raise HTTPException(status_code=503, detail="PayFast is disabled")
+
+        credentials = get_payfast_credentials()
+        order_id = order["_id"]
+        order_number = order.get("order_number", order_id)
+        status_token = order.get("status_token") or ""
+        status_query = f"&status_token={urllib.parse.quote_plus(status_token)}" if status_token else ""
+        action_url = payfast_config["action_url"]
+
+        if not FRONTEND_URL:
+            raise HTTPException(status_code=500, detail="FRONTEND_URL is not configured")
+        if not BACKEND_URL:
+            raise HTTPException(status_code=500, detail="BACKEND_URL is not configured")
+        for url_name, url_value in (("FRONTEND_URL", FRONTEND_URL), ("BACKEND_URL", BACKEND_URL)):
+            if not url_value.startswith("https://") and "localhost" not in url_value and "127.0.0.1" not in url_value:
+                raise HTTPException(status_code=500, detail=f"{url_name} must use https in production")
+
+        payfast_data = {
+            "merchant_id": credentials["merchant_id"],
+            "merchant_key": credentials["merchant_key"],
+            "return_url": f"{FRONTEND_URL}/payment/success?order_id={order_id}{status_query}",
+            "cancel_url": f"{FRONTEND_URL}/payment/cancel?order_id={order_id}{status_query}",
+            "notify_url": f"{BACKEND_URL}/api/webhooks/payfast",
+            "m_payment_id": order_id,
+            "amount": f"{float(order['total']):.2f}",
+            "item_name": f"Cape Ember Order {order_number}",
+            "item_description": f"Cape Ember order {order_number}",
+            "email_address": customer.get("email") or order.get("guest_email") or "",
+            "name_first": customer.get("first_name") or "Customer",
+            "name_last": customer.get("last_name") or "",
+        }
+
+        signature = generate_payfast_signature(payfast_data, credentials["passphrase"])
+        payfast_data["signature"] = signature
+        logger.info(
+            "PayFast checkout prepared: order_id=%s amount=%s action_url=%s fields=%s",
+            order_id,
+            payfast_data.get("amount"),
+            action_url,
+            sorted(payfast_data.keys()),
+        )
+        return {
+            "provider": "payfast",
+            "host": payfast_config["process_host"],
+            "action_url": action_url,
+            "fields": payfast_data,
+        }
+
+    async def verify_notification(self, request: Request, payload: Dict[str, Any]) -> dict:
+        verified = await verify_payfast_itn(request)
+        return {"verified": verified, "provider": "payfast"}
+
+    async def get_payment_status(self, reference: str) -> dict:
+        return {"provider": "payfast", "reference": reference, "status": "unknown"}
+
+    async def refund_payment(self, payment_id: str, amount: float) -> dict:
+        raise HTTPException(status_code=501, detail="PayFast refund API is not implemented in this service")
+
+
+def get_payment_provider(provider_name: str) -> PaymentProvider:
+    provider = (provider_name or "").lower()
+    if provider == "payfast":
+        return PayFastPaymentProvider()
+    raise HTTPException(status_code=400, detail=f"Unsupported payment provider: {provider_name}")
+
+def get_payfast_credentials() -> Dict[str, str]:
+    try:
+        config = get_payfast_config()
+    except PayFastConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not config["enabled"]:
+        raise HTTPException(status_code=503, detail="PayFast is disabled")
+
+    return {
+        "merchant_id": config["merchant_id"],
+        "merchant_key": config["merchant_key"],
+        "passphrase": config["passphrase"],
+    }
+
+
+def generate_payfast_signature(data: Dict[str, str], passphrase: Optional[str] = None) -> str:
+    # Build canonical payload in insertion order to match PayFast docs/examples.
+    payload_parts = []
+    for key, value in data.items():
+        if key == "signature" or value is None:
+            continue
+
+        normalized_value = str(value).strip().replace("\r", "").replace("\n", "")
+        if normalized_value == "":
+            continue
+
+        encoded_value = urllib.parse.quote_plus(normalized_value.replace("+", " "))
+        payload_parts.append(f"{key}={encoded_value}")
+
+    param_string = "&".join(payload_parts)
+
+    if passphrase is None:
+        try:
+            effective_passphrase = get_payfast_config().get("passphrase", "")
+        except PayFastConfigurationError:
+            effective_passphrase = ""
+    else:
+        effective_passphrase = passphrase
+
+    effective_passphrase = str(effective_passphrase or "").strip().replace("\r", "").replace("\n", "")
+    if effective_passphrase:
+        passphrase_encoded = urllib.parse.quote_plus(effective_passphrase.replace("+", " "))
+        if param_string:
+            param_string += f"&passphrase={passphrase_encoded}"
+        else:
+            param_string = f"passphrase={passphrase_encoded}"
+
+    signature = hashlib.md5(param_string.encode("utf-8")).hexdigest()
     
     if PAYFAST_DEBUG:
         logger.info("="*80)
         logger.info("PayFast Signature Generation Debug:")
-        logger.info(f"Fields (before URL encoding): {dict(sorted_items)}")
+        logger.info("Fields (before URL encoding): %s", [k for k, v in data.items() if k != "signature" and v not in (None, "")])
         logger.info(f"Full param string: {param_string}")
         logger.info(f"Calculated signature: {signature}")
         logger.info("="*80)
-    
     return signature
 
+
 async def verify_payfast_itn(request: Request) -> bool:
-    """Verify PayFast ITN request"""
+    """Verify PayFast ITN request signature and merchant identity."""
     form_data = await request.form()
     data = dict(form_data)
-    
-    # Verify signature
-    received_sig = data.pop("signature", "")
-    expected_sig = generate_payfast_signature(data)
-    
-    if received_sig != expected_sig:
-        logger.warning("PayFast ITN: Invalid signature")
+
+    if not data:
+        logger.warning("PayFast ITN: empty payload")
         return False
-    
-    # Verify source IP (PayFast IPs)
-    payfast_ips = [
-        "197.97.145.144", "197.97.145.145", "197.97.145.146", "197.97.145.147",
-        "41.74.179.194", "41.74.179.195", "41.74.179.196", "41.74.179.197"
-    ]
-    
-    client_ip = request.client.host
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-    
-    # In sandbox mode, skip IP check
-    if not PAYFAST_SANDBOX and client_ip not in payfast_ips:
-        logger.warning(f"PayFast ITN: Invalid source IP {client_ip}")
+
+    credentials = get_payfast_credentials()
+
+    received_merchant_id = str(data.get("merchant_id", "")).strip()
+    received_merchant_key = str(data.get("merchant_key", "")).strip()
+    if received_merchant_id != credentials["merchant_id"] or received_merchant_key != credentials["merchant_key"]:
+        logger.warning("PayFast ITN: merchant mismatch")
         return False
-    
+
+    received_sig = str(data.pop("signature", "")).strip().lower()
+    expected_sig = generate_payfast_signature(data, credentials["passphrase"]).strip().lower()
+    if not received_sig or received_sig != expected_sig:
+        logger.warning("PayFast ITN: invalid signature")
+        return False
+
     return True
 
 
-# ============ STITCH PAYMENT FUNCTIONS ============
-
-def get_stitch_private_key() -> Optional[str]:
-    if STITCH_PRIVATE_KEY:
-        return STITCH_PRIVATE_KEY.replace('\\n', '\n')
-    if STITCH_PRIVATE_KEY_PATH:
-        key_path = Path(STITCH_PRIVATE_KEY_PATH)
-        if key_path.exists():
-            return key_path.read_text()
-    return None
-
-
-def build_stitch_client_assertion() -> Optional[str]:
-    private_key = get_stitch_private_key()
-    if not private_key:
-        logger.info("Stitch private key not configured; skipping private_key_jwt flow.")
-        return None
-
-    now = datetime.now(timezone.utc)
-    payload = {
-        "iss": STITCH_CLIENT_ID,
-        "sub": STITCH_CLIENT_ID,
-        "aud": STITCH_TOKEN_URL,
-        "jti": str(uuid.uuid4()),
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=5)).timestamp()),
-    }
+def validate_payfast_itn_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    required_fields = [
+        "m_payment_id",
+        "payment_status",
+        "amount_gross",
+        "merchant_id",
+        "signature",
+    ]
+    missing_fields = [field for field in required_fields if not str(data.get(field, "")).strip()]
+    if missing_fields:
+        return {
+            "valid": False,
+            "reason_code": "missing_required_fields",
+            "status_code": 400,
+            "missing_fields": missing_fields,
+            "merchant_valid": False,
+            "signature_valid": False,
+        }
 
     try:
-        return jwt.encode(payload, private_key, algorithm="RS256")
-    except Exception as e:
-        logger.error(f"Stitch client assertion creation failed: {e}")
-        return None
-
-
-async def get_stitch_access_token() -> str:
-    """Get Stitch Express API access token using client credentials"""
-    if not STITCH_CLIENT_ID or not STITCH_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Stitch not configured")
-
-    def parse_json(response):
-        try:
-            return response.json()
-        except Exception:
-            return {"error": response.text}
-
-    import base64
-    credentials = f"{STITCH_CLIENT_ID}:{STITCH_CLIENT_SECRET}"
-    encoded_credentials = base64.b64encode(credentials.encode()).decode()
-
-    async with httpx.AsyncClient() as client:
-        token_data = {}
-        response = None
-
-        client_assertion = build_stitch_client_assertion()
-        if client_assertion:
-            logger.info("Attempting Stitch client_assertion token exchange using private key.")
-            response = await client.post(
-                STITCH_TOKEN_URL,
-                data={
-                    "grant_type": "client_credentials",
-                    "scope": STITCH_SCOPE,
-                    "client_id": STITCH_CLIENT_ID,
-                    "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-                    "client_assertion": client_assertion,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
-            token_data = parse_json(response)
-            if response.status_code == 200 and token_data.get("access_token"):
-                return token_data["access_token"]
-            logger.warning(f"Stitch private_key_jwt token exchange failed: {response.status_code} {token_data}")
-
-        logger.info("Falling back to Stitch Basic auth token exchange.")
-        response = await client.post(
-            STITCH_OAUTH_URL,
-            data={
-                "grant_type": "client_credentials",
-                "scope": STITCH_SCOPE,
-            },
-            headers={
-                "Authorization": f"Basic {encoded_credentials}",
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-        )
-        token_data = parse_json(response)
-
-        if response.status_code != 200 or token_data.get("errors"):
-            logger.info("Trying alternate Stitch token endpoint...")
-            response = await client.post(
-                STITCH_TOKEN_URL,
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": STITCH_CLIENT_ID,
-                    "client_secret": STITCH_CLIENT_SECRET,
-                    "scope": STITCH_SCOPE,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
-            token_data = parse_json(response)
-
-        if response.status_code != 200 or token_data.get("errors") or not token_data.get("access_token"):
-            logger.error(f"Stitch token error: {response.status_code} - {token_data}")
-            raise HTTPException(
-                status_code=503,
-                detail="Stitch payment service unavailable. Verify your Stitch credentials and private key configuration."
-            )
-
-        access_token = token_data.get("access_token") or token_data.get("token") or token_data.get("id_token")
-        if not access_token:
-            logger.error(f"Stitch token response missing access token: {token_data}")
-            raise HTTPException(
-                status_code=503,
-                detail="Stitch payment service unavailable. Verify your Stitch credentials and private key configuration."
-            )
-
-        return access_token
-
-async def create_stitch_payment(
-    amount: float,
-    reference: str,
-    method: str,
-    redirect_url: str
-) -> dict:
-    """Create Stitch payment request"""
-    token = await get_stitch_access_token()
-    
-    mutation = """
-    mutation CreatePaymentRequest($input: PaymentInitiationRequestInput!) {
-        clientPaymentInitiationRequestCreate(input: $input) {
-            paymentInitiationRequest {
-                id
-                url
-            }
-        }
-    }
-    """
-    
-    variables = {
-        "input": {
-            "amount": {
-                "quantity": int(amount * 100),  # Amount in cents
-                "currency": "ZAR"
-            },
-            "payerReference": reference,
-            "beneficiaryReference": f"Cape Ember {reference}",
-            "externalReference": reference,
-            "successUrl": redirect_url,
-            "cancelUrl": f"{FRONTEND_URL}/order/cancel?order_id={reference}",
-            "failureUrl": f"{FRONTEND_URL}/order/failure?order_id={reference}"
-        }
-    }
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.stitch.money/graphql",
-            json={"query": mutation, "variables": variables},
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-        )
-        
-        data = response.json()
-        if "errors" in data:
-            logger.error(f"Stitch error: {data['errors']}")
-            raise HTTPException(status_code=500, detail="Payment creation failed")
-        
-        pir = data["data"]["clientPaymentInitiationRequestCreate"]["paymentInitiationRequest"]
+        credentials = get_payfast_credentials()
+    except HTTPException as exc:
         return {
-            "id": pir["id"],
-            "url": pir["url"]
+            "valid": False,
+            "reason_code": "config_error",
+            "status_code": 500,
+            "missing_fields": [],
+            "merchant_valid": False,
+            "signature_valid": False,
+            "detail": str(exc.detail),
         }
 
-def verify_stitch_webhook(request: Request, body: bytes) -> bool:
-    """Verify Stitch webhook signature"""
-    if not STITCH_WEBHOOK_SECRET:
-        return True  # Skip verification if not configured
-    
-    signature = request.headers.get("X-Stitch-Signature", "")
-    timestamp = request.headers.get("X-Stitch-Timestamp", "")
-    
-    if not signature or not timestamp:
-        return False
-    
-    # Build canonical string
-    canonical = f"{timestamp}.{body.decode('utf-8')}"
-    
-    expected = hmac.new(
-        STITCH_WEBHOOK_SECRET.encode(),
-        canonical.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return hmac.compare_digest(expected, signature)
+    received_merchant_id = str(data.get("merchant_id", "")).strip()
+    received_merchant_key = str(data.get("merchant_key", "")).strip()
+    merchant_valid = (
+        received_merchant_id == credentials["merchant_id"]
+        and received_merchant_key == credentials["merchant_key"]
+    )
+    if not merchant_valid:
+        return {
+            "valid": False,
+            "reason_code": "merchant_mismatch",
+            "status_code": 400,
+            "missing_fields": [],
+            "merchant_valid": False,
+            "signature_valid": False,
+        }
+
+    signature_input = {k: v for k, v in data.items() if k != "signature"}
+    received_signature = str(data.get("signature", "")).strip().lower()
+    expected_signature = generate_payfast_signature(signature_input, credentials["passphrase"]).strip().lower()
+    signature_valid = bool(received_signature) and received_signature == expected_signature
+    if not signature_valid:
+        return {
+            "valid": False,
+            "reason_code": "invalid_signature",
+            "status_code": 400,
+            "missing_fields": [],
+            "merchant_valid": True,
+            "signature_valid": False,
+        }
+
+    return {
+        "valid": True,
+        "reason_code": "ok",
+        "status_code": 200,
+        "missing_fields": [],
+        "merchant_valid": True,
+        "signature_valid": True,
+    }
 
 
 # ============ EMAIL FUNCTIONS ============
@@ -2446,12 +2691,13 @@ async def remove_coupon(
 # ============ SHIPPING ROUTES ============
 
 @api_router.get("/shipping/rates")
-async def get_shipping_rates(province: str, subtotal: float):
+async def get_shipping_rates(province: str, subtotal: float, city: Optional[str] = None, postal_code: Optional[str] = None):
     """Get shipping rates for a province"""
     store_rules = await get_store_rules()
     threshold = store_rules["free_shipping_threshold"]
 
-    if is_sedgefield_destination(province):
+    local_delivery = is_free_local_delivery({"city": city, "province": province, "postal_code": postal_code}, ["sedgefield"])
+    if local_delivery["eligible"]:
         return {
             "rates": [
                 {"method": "standard", "name": "Standard Delivery (3-5 days)", "price": 0, "free": True},
@@ -2489,6 +2735,19 @@ async def get_shipping_rates(province: str, subtotal: float):
         "free_shipping_threshold": threshold,
         "amount_until_free": max(0, threshold - subtotal)
     }
+
+
+@api_router.get("/payments/providers")
+async def get_payment_providers():
+    providers = [
+        {
+            "id": "payfast",
+            "label": "PayFast",
+            "description": "Pay securely by card, Instant EFT or another enabled PayFast method.",
+            "active": True,
+        }
+    ]
+    return {"providers": providers}
 
 
 # ============ CHECKOUT & ORDER ROUTES ============
@@ -2553,23 +2812,32 @@ async def create_checkout(
                 discount = min(coupon["discount_value"], subtotal)
     
     store_rules = await get_store_rules()
-    shipping_cost = calculate_shipping(
-        subtotal - discount,
-        checkout.shipping.method,
-        checkout.shipping.address.province,
-        checkout.is_subscription,
-        checkout.shipping.address.city,
-        store_rules["free_shipping_threshold"],
-        store_rules["shipping_fee"],
+    store_settings = await db.settings.find_one({"_id": "store"}) or {}
+    tax_config = resolve_tax_config(store_settings)
+
+    shipping_result = resolve_shipping_charge(
+        subtotal_after_discount=subtotal - discount,
+        method=checkout.shipping.method,
+        province=checkout.shipping.address.province,
+        city=checkout.shipping.address.city,
+        postal_code=checkout.shipping.address.postal_code,
+        is_subscription=checkout.is_subscription,
+        order_items=order_items,
+        coupon=coupon,
+        free_shipping_threshold=store_rules["free_shipping_threshold"],
+        default_shipping_fee=store_rules["shipping_fee"],
+        sedgefield_aliases=["sedgefield"],
     )
-    
+    shipping_cost = shipping_result["final_delivery_rate"]
+
     totals = calculate_cart_totals(
         [{"price": item["price"], "quantity": item["quantity"]} for item in order_items],
         coupon,
         shipping_cost,
-        store_rules["vat_rate"],
+        tax_config["taxRate"],
     )
-    vat = totals["vat"]
+    vat_components = calculate_vat_components(totals["subtotal"] - totals["discount"], tax_config)
+    vat = vat_components["vat"]
     total = totals["total"]
     
     if total < 5.0:
@@ -2580,20 +2848,60 @@ async def create_checkout(
     order_number = generate_order_number()
     now = datetime.now(timezone.utc).isoformat()
     
+    payment_snapshot = {
+        "lines": [
+            {
+                "product_id": item["product_id"],
+                "variant_id": item.get("variant_id"),
+                "product_name": item["product_name"],
+                "variant_name": item.get("variant_name"),
+                "quantity": item["quantity"],
+                "unit_price": round(float(item["price"]), 2),
+                "line_total": round(float(item["total"]), 2),
+            }
+            for item in order_items
+        ],
+        "discount": totals["discount"],
+        "delivery": {
+            "original_rate": shipping_result["original_delivery_rate"],
+            "waived_amount": shipping_result["waived_amount"],
+            "applied_rule": shipping_result["applied_rule"],
+            "reason": shipping_result["reason"],
+            "final_rate": shipping_cost,
+        },
+        "vat": {
+            "registration_status": tax_config["taxRegistrationStatus"],
+            "rate": tax_config["taxRate"],
+            "prices_include_tax": tax_config["pricesIncludeTax"],
+            "gross": vat_components["gross"],
+            "net": vat_components["net"],
+            "vat": vat_components["vat"],
+        },
+        "currency": "ZAR",
+        "customer_identifier": user_id or checkout.guest_email,
+        "coupon_code": cart.get("coupon_code"),
+    }
+
+    payment_provider = "payfast"
+
     order_doc = {
         "_id": order_id,
         "order_number": order_number,
+        "status_token": secrets.token_urlsafe(24),
         "user_id": user_id,
         "guest_email": checkout.guest_email if not user_id else None,
         "items": order_items,
         "subtotal": totals["subtotal"],
         "discount": totals["discount"],
         "shipping_cost": round(shipping_cost, 2),
+        "shipping_snapshot": shipping_result,
         "vat": vat,
         "total": round(total, 2),
         "status": OrderStatus.PENDING_PAYMENT,
         "payment_status": PaymentStatus.PENDING,
-        "payment_method": checkout.payment_method,
+        "payment_method": PaymentMethod.PAYFAST.value,
+        "payment_provider": payment_provider,
+        "payment_snapshot": payment_snapshot,
         "shipping": {
             "method": checkout.shipping.method,
             "address": checkout.shipping.address.dict(),
@@ -2620,7 +2928,7 @@ async def create_checkout(
         checkout.shipping.address.last_name,
         {
             "checkout_id": order_id,
-            "payment_method": checkout.payment_method,
+            "payment_method": PaymentMethod.PAYFAST.value,
             "subtotal": totals["subtotal"],
             "is_subscription": checkout.is_subscription,
         },
@@ -2632,7 +2940,7 @@ async def create_checkout(
         {"email": email, "first_name": first_name},
         {
             "order_id": order_id,
-            "payment_method": checkout.payment_method,
+            "payment_method": PaymentMethod.PAYFAST.value,
             "subtotal": totals["subtotal"],
             "is_subscription": checkout.is_subscription,
         },
@@ -2645,66 +2953,50 @@ async def create_checkout(
         order_id
     )
     
-    # Generate payment based on method
-    payment_data = None
-    
-    if checkout.payment_method == PaymentMethod.PAYFAST:
-        # PayFast payment
-        email = user["email"] if user else checkout.guest_email
-        first_name = checkout.shipping.address.first_name.strip()
-        last_name = checkout.shipping.address.last_name.strip()
-        
-        # PayFast requires merchant_id AND merchant_key in the form AND in the signature.
-        # m_payment_id must be the order UUID so the ITN webhook can look it up directly.
-        payfast_data = {
-            "merchant_id": PAYFAST_MERCHANT_ID,
-            "merchant_key": PAYFAST_MERCHANT_KEY,
-            "return_url": f"{FRONTEND_URL}/payment/success?order_id={order_id}",
-            "cancel_url": f"{FRONTEND_URL}/payment/cancel?order_id={order_id}",
-            "notify_url": f"{BACKEND_URL}/api/webhooks/payfast",
-            "m_payment_id": order_id,
-            "amount": f"{total:.2f}",
-            "item_name": f"Cape Ember Order {order_number}",
-            "email_address": email,
-            "name_first": first_name,
-            "name_last": last_name,
+    provider = get_payment_provider(payment_provider)
+    customer_identity = {
+        "email": user["email"] if user else checkout.guest_email,
+        "first_name": checkout.shipping.address.first_name,
+        "last_name": checkout.shipping.address.last_name,
+    }
+    provider_checkout = await provider.create_checkout(order_doc, customer_identity)
+
+    payment_attempt_id = str(uuid.uuid4())
+    payment_attempt = {
+        "_id": payment_attempt_id,
+        "order_id": order_id,
+        "order_number": order_number,
+        "provider": payment_provider,
+        "provider_reference": payment_attempt_id,
+        "status": PaymentAttemptStatus.CREATED.value,
+        "currency": "ZAR",
+        "expected_total": round(float(total), 2),
+        "request_payload": {
+            "host": provider_checkout.get("host"),
+            "field_keys": sorted(list((provider_checkout.get("fields") or {}).keys())),
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.payment_attempts.insert_one(payment_attempt)
+
+    await db.orders.update_one(
+        {"_id": order_id},
+        {
+            "$set": {
+                "payment_attempt_id": payment_attempt_id,
+                "updated_at": now,
+            }
         }
-        
-        signature = generate_payfast_signature(payfast_data)
-        payfast_data["signature"] = signature
-        
-        if PAYFAST_DEBUG:
-            safe = {k: v for k, v in payfast_data.items() if k not in ("merchant_key", "passphrase")}
-            logger.info(f"PayFast checkout for {order_number}: signature={signature} fields={safe}")
-        
-        payment_data = {
-            "method": "payfast",
-            "host": get_payfast_host(),
-            "fields": payfast_data
-        }
-    
-    elif checkout.payment_method in [PaymentMethod.STITCH_CARD, PaymentMethod.STITCH_EFT]:
-        # Stitch payment — only available when STITCH_ENABLED=true
-        if not STITCH_ENABLED or not STITCH_CLIENT_ID:
-            raise HTTPException(status_code=400, detail="Stitch payments are not currently available. Please use PayFast.")
-        
-        stitch_result = await create_stitch_payment(
-            total,
-            order_number,
-            checkout.payment_method.value,
-            f"{FRONTEND_URL}/payment/success?order_id={order_id}"
-        )
-        
-        # Store Stitch payment ID
-        await db.orders.update_one(
-            {"_id": order_id},
-            {"$set": {"stitch_payment_id": stitch_result["id"]}}
-        )
-        
-        payment_data = {
-            "method": "stitch",
-            "redirect_url": stitch_result["url"]
-        }
+    )
+
+    payment_data = {
+        "method": "payfast",
+        "action_url": provider_checkout.get("action_url") or f"https://{provider_checkout['host']}/eng/process",
+        "host": provider_checkout["host"],
+        "fields": provider_checkout["fields"],
+        "attempt_id": payment_attempt_id,
+    }
     
     return {
         "order_id": order_id,
@@ -2714,6 +3006,12 @@ async def create_checkout(
         "shipping_cost": round(shipping_cost, 2),
         "vat": vat,
         "total": total,
+        "currency": "ZAR",
+        "shipping_rule": shipping_result,
+        "tax_config": {
+            "taxRegistrationStatus": tax_config["taxRegistrationStatus"],
+            "pricesIncludeTax": tax_config["pricesIncludeTax"],
+        },
         "payment": payment_data
     }
 
@@ -2771,23 +3069,30 @@ async def create_simple_order(
             discount = min(coupon["discount_value"], subtotal)
 
     store_rules = await get_store_rules()
-    shipping_cost = calculate_shipping(
-        subtotal - discount,
-        ShippingMethod.STANDARD,
-        order_data.shipping_address.get("province", "Western Cape"),
-        order_data.is_subscription,
-        order_data.shipping_address.get("city"),
-        store_rules["free_shipping_threshold"],
-        store_rules["shipping_fee"],
+    store_settings = await db.settings.find_one({"_id": "store"}) or {}
+    tax_config = resolve_tax_config(store_settings)
+    shipping_result = resolve_shipping_charge(
+        subtotal_after_discount=subtotal - discount,
+        method=ShippingMethod.STANDARD,
+        province=order_data.shipping_address.get("province", "Western Cape"),
+        city=order_data.shipping_address.get("city"),
+        postal_code=order_data.shipping_address.get("postal_code"),
+        is_subscription=order_data.is_subscription,
+        order_items=order_items,
+        coupon=coupon,
+        free_shipping_threshold=store_rules["free_shipping_threshold"],
+        default_shipping_fee=store_rules["shipping_fee"],
+        sedgefield_aliases=["sedgefield"],
     )
+    shipping_cost = shipping_result["final_delivery_rate"]
     totals = calculate_cart_totals(
         [{"price": item["price"], "quantity": item["quantity"]} for item in order_items],
         coupon,
         shipping_cost,
-        store_rules["vat_rate"],
+        tax_config["taxRate"],
     )
     total = totals["total"]
-    vat = totals["vat"]
+    vat = calculate_vat_components(totals["subtotal"] - totals["discount"], tax_config)["vat"]
     discount = totals["discount"]
     
     # Generate order number and ID
@@ -2807,9 +3112,11 @@ async def create_simple_order(
         "shipping_cost": round(shipping_cost, 2),
         "vat": vat,
         "total": total,
-        "status": OrderStatus.PENDING.value,
+        "status": OrderStatus.PENDING_PAYMENT.value,
         "payment_status": PaymentStatus.PENDING.value,
         "payment_method": order_data.payment_method or "payfast",
+        "payment_provider": "payfast",
+        "shipping_snapshot": shipping_result,
         "shipping": {
             "method": "standard",
             "address": order_data.shipping_address,
@@ -2848,75 +3155,61 @@ async def create_payfast_payment(payment: SimplePaymentCreate, user: dict = Depe
     order = await db.orders.find_one({"_id": payment.order_id, "user_id": user["_id"]})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    # m_payment_id must be the order UUID so the ITN webhook can look it up directly
-    payfast_data = {
-        "merchant_id": PAYFAST_MERCHANT_ID,
-        "merchant_key": PAYFAST_MERCHANT_KEY,
-        "return_url": f"{FRONTEND_URL}/order/success?order_id={payment.order_id}",
-        "cancel_url": f"{FRONTEND_URL}/order/cancel?order_id={payment.order_id}",
-        "notify_url": f"{BACKEND_URL}/api/webhooks/payfast",
-        "m_payment_id": payment.order_id,
-        "amount": f"{order['total']:.2f}",
-        "item_name": f"Cape Ember Order {order.get('order_number', 'N/A')}",
-        "email_address": user["email"],
-        "name_first": user.get("first_name", "Customer"),
-        "name_last": user.get("last_name", "")
-    }
 
-    signature = generate_payfast_signature(payfast_data)
-    payfast_data["signature"] = signature
+    provider = get_payment_provider("payfast")
+    payment_payload = await provider.create_checkout(
+        order,
+        {
+            "email": user.get("email"),
+            "first_name": user.get("first_name"),
+            "last_name": user.get("last_name"),
+        },
+    )
+
+    attempt_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    if hasattr(db, "payment_attempts"):
+        await db.payment_attempts.insert_one(
+            {
+                "_id": attempt_id,
+                "order_id": payment.order_id,
+                "order_number": order.get("order_number"),
+                "provider": "payfast",
+                "provider_reference": attempt_id,
+                "status": PaymentAttemptStatus.CREATED.value,
+                "currency": "ZAR",
+                "expected_total": round(float(order.get("total", 0)), 2),
+                "request_payload": {
+                    "host": payment_payload.get("host"),
+                    "field_keys": sorted(list((payment_payload.get("fields") or {}).keys())),
+                },
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    if hasattr(db.orders, "update_one"):
+        await db.orders.update_one({"_id": payment.order_id}, {"$set": {"payment_attempt_id": attempt_id, "updated_at": now}})
 
     if PAYFAST_DEBUG:
-        payload_debug = {k: v for k, v in payfast_data.items() if k != "passphrase"}
+        payload_debug = {k: v for k, v in (payment_payload.get("fields") or {}).items() if k != "passphrase"}
         logger.info("PayFast create-payment debug: %s", payload_debug)
+
+    logger.info(
+        "PayFast create-payment prepared: order_id=%s attempt_id=%s amount=%s action_url=%s fields=%s",
+        payment.order_id,
+        attempt_id,
+        (payment_payload.get("fields") or {}).get("amount"),
+        payment_payload.get("action_url") or f"https://{payment_payload.get('host')}/eng/process",
+        sorted(list((payment_payload.get("fields") or {}).keys())),
+    )
     
     return {
-        "payfast_host": get_payfast_host(),
-        "fields": payfast_data
+        "payfast_host": payment_payload["host"],
+        "action_url": payment_payload.get("action_url") or f"https://{payment_payload['host']}/eng/process",
+        "fields": payment_payload["fields"],
+        "attempt_id": attempt_id,
     }
 
-
-@api_router.post("/stitch/create-payment")
-async def create_stitch_payment_endpoint(payment: SimplePaymentCreate, user: dict = Depends(get_current_user)):
-    """Create Stitch payment for an existing order"""
-    if not STITCH_CLIENT_ID or not STITCH_CLIENT_SECRET:
-        raise HTTPException(status_code=400, detail="Stitch payments not configured. Please use PayFast instead.")
-    
-    order = await db.orders.find_one({"_id": payment.order_id, "user_id": user["_id"]})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    
-    try:
-        stitch_result = await create_stitch_payment(
-            order["total"],
-            order["order_number"],
-            "stitch_eft",
-            f"{FRONTEND_URL}/order/success?order_id={payment.order_id}"
-        )
-        
-        # Store Stitch payment ID
-        await db.orders.update_one(
-            {"_id": payment.order_id},
-            {"$set": {
-                "stitch_payment_id": stitch_result["id"],
-                "payment_method": "stitch"
-            }}
-        )
-        
-        return {
-            "redirect_url": stitch_result["url"],
-            "payment_id": stitch_result["id"]
-        }
-    except HTTPException as he:
-        # Re-raise HTTP exceptions as-is
-        raise he
-    except Exception as e:
-        logger.error(f"Stitch payment error: {e}")
-        raise HTTPException(
-            status_code=503, 
-            detail="Stitch payment service temporarily unavailable. Please try PayFast or try again later."
-        )
 
 
 @api_router.get("/orders")
@@ -2947,18 +3240,54 @@ async def get_orders(user: dict = Depends(get_current_user), page: int = 1, limi
 
 
 @api_router.get("/orders/{order_id}/status")
-async def get_order_status(order_id: str):
+async def get_order_status(order_id: str, status_token: Optional[str] = None, user: Optional[dict] = Depends(get_current_user_optional)):
     """Public lightweight status endpoint for payment return page polling.
     Returns only non-sensitive status fields so guests can poll post-payment."""
     order = await db.orders.find_one({"_id": order_id}, {"status": 1, "payment_status": 1, "order_number": 1})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    if user:
+        owner_id = user.get("_id")
+        full_order = await db.orders.find_one({"_id": order_id}, {"user_id": 1})
+        if full_order and full_order.get("user_id") and full_order.get("user_id") != owner_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        full_order = await db.orders.find_one({"_id": order_id}, {"status_token": 1})
+        expected_token = (full_order or {}).get("status_token")
+        if expected_token and status_token != expected_token:
+            raise HTTPException(status_code=403, detail="Invalid status token")
+
     return {
         "order_id": order_id,
         "order_number": order.get("order_number"),
         "status": order.get("status"),
         "payment_status": order.get("payment_status"),
     }
+
+
+@api_router.post("/orders/{order_id}/payment/cancel")
+async def cancel_order_payment(order_id: str, status_token: Optional[str] = None, user: Optional[dict] = Depends(get_current_user_optional)):
+    order = await db.orders.find_one({"_id": order_id}, {"_id": 1, "user_id": 1, "status_token": 1})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if user:
+        if order.get("user_id") and order.get("user_id") != user.get("_id"):
+            raise HTTPException(status_code=403, detail="Forbidden")
+    elif order.get("status_token") and status_token != order.get("status_token"):
+        raise HTTPException(status_code=403, detail="Invalid status token")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one(
+        {"_id": order_id},
+        {"$set": {"status": OrderStatus.PENDING_PAYMENT.value, "payment_status": PaymentStatus.CANCELLED.value, "updated_at": now}},
+    )
+    await db.payment_attempts.update_many(
+        {"order_id": order_id, "status": {"$in": [PaymentAttemptStatus.CREATED.value, PaymentAttemptStatus.PENDING.value, PaymentAttemptStatus.REDIRECTED.value]}},
+        {"$set": {"status": PaymentAttemptStatus.CANCELLED.value, "updated_at": now}},
+    )
+    return {"message": "Payment attempt cancelled"}
 
 
 @api_router.get("/orders/{order_id}")
@@ -3026,186 +3355,148 @@ async def reorder(order_id: str, user: dict = Depends(get_current_user)):
 @api_router.post("/webhooks/payfast")
 async def payfast_webhook(request: Request, background_tasks: BackgroundTasks):
     """PayFast ITN webhook handler — authoritative payment signal."""
-    # Starlette caches form data after first read; verify_payfast_itn reads it first.
-    if not await verify_payfast_itn(request):
-        logger.warning("PayFast ITN: verification failed — ignoring")
-        return Response(content="OK", status_code=200)
-    
-    # Safe to re-read; Starlette returns cached ImmutableMultiDict
-    form_data = await request.form()
-    data = dict(form_data)
-    
-    order_id = data.get("m_payment_id")
-    payment_status = data.get("payment_status")
-    pf_payment_id = data.get("pf_payment_id")
-    amount_gross = data.get("amount_gross", "0")
-    
-    logger.info(f"PayFast ITN: order_id={order_id} status={payment_status} pf_id={pf_payment_id}")
-    
-    if not order_id:
-        return Response(content="OK", status_code=200)
-    
-    order = await db.orders.find_one({"_id": order_id})
-    if not order:
-        logger.warning(f"PayFast ITN: order not found for m_payment_id={order_id}")
-        return Response(content="OK", status_code=200)
-    
     now = datetime.now(timezone.utc).isoformat()
-    
-    if payment_status == "COMPLETE":
-        # Idempotency: skip if already paid
-        if order.get("payment_status") == PaymentStatus.COMPLETE:
-            logger.info(f"PayFast ITN: order {order_id} already paid — ignoring duplicate")
-            return Response(content="OK", status_code=200)
-        
-        # Amount validation: compare reported amount to frozen order total
-        try:
-            reported_amount = round(float(amount_gross), 2)
-            expected_amount = round(float(order["total"]), 2)
+    order_id = None
+    payment_status = ""
+    validation_stage = "received"
+    failure_reason = ""
+    response_status = 500
+    idempotency_outcome = "none"
+
+    try:
+        content_type = (request.headers.get("content-type") or "").lower()
+        if "application/x-www-form-urlencoded" not in content_type and "multipart/form-data" not in content_type:
+            validation_stage = "content_type"
+            failure_reason = "unsupported_content_type"
+            response_status = 400
+            return JSONResponse({"detail": "Malformed ITN payload"}, status_code=400)
+
+        form_data = await request.form()
+        data = {k: str(v).strip() for k, v in dict(form_data).items()}
+        order_id = data.get("m_payment_id")
+        payment_status = data.get("payment_status", "")
+        pf_payment_id = data.get("pf_payment_id", "")
+        amount_gross = data.get("amount_gross", "0")
+
+        validation = validate_payfast_itn_payload(data)
+        validation_stage = "payload_validation"
+        if not validation["valid"]:
+            failure_reason = validation["reason_code"]
+            response_status = validation["status_code"]
+            if order_id:
+                await db.payment_attempts.update_many(
+                    {"order_id": order_id, "provider": "payfast"},
+                    {"$set": {"status": PaymentAttemptStatus.INVALID_NOTIFICATION.value, "updated_at": now}},
+                )
+            return JSONResponse({"detail": "Invalid PayFast ITN"}, status_code=response_status)
+
+        event_key = f"payfast:{order_id}:{pf_payment_id}:{payment_status}:{amount_gross}"
+        webhook_result = await db.webhook_events.update_one(
+            {"provider": "payfast", "event_key": event_key},
+            {
+                "$setOnInsert": {
+                    "_id": str(uuid.uuid4()),
+                    "provider": "payfast",
+                    "event_key": event_key,
+                    "order_id": order_id,
+                    "payload": data,
+                    "received_at": now,
+                }
+            },
+            upsert=True,
+        )
+        if getattr(webhook_result, "matched_count", 0):
+            idempotency_outcome = "duplicate_event_key"
+
+        order = await db.orders.find_one({"_id": order_id})
+        validation_stage = "order_lookup"
+        if not order:
+            failure_reason = "order_not_found"
+            response_status = 404
+            return JSONResponse({"detail": "Order not found"}, status_code=404)
+
+        await db.orders.update_one(
+            {"_id": order_id},
+            {"$set": {"status": OrderStatus.PAYMENT_PROCESSING.value, "updated_at": now}},
+        )
+
+        if pf_payment_id:
+            conflicting = await db.orders.find_one(
+                {
+                    "payfast_payment_id": pf_payment_id,
+                    "_id": {"$ne": order_id},
+                    "payment_status": PaymentStatus.COMPLETE.value,
+                },
+                {"_id": 1, "order_number": 1},
+            )
+            if conflicting:
+                failure_reason = "transaction_reuse"
+                response_status = 400
+                await db.payment_attempts.update_many(
+                    {"order_id": order_id, "provider": "payfast"},
+                    {"$set": {"status": PaymentAttemptStatus.INVALID_NOTIFICATION.value, "updated_at": now}},
+                )
+                return JSONResponse({"detail": "Invalid PayFast ITN"}, status_code=400)
+
+        if payment_status == "COMPLETE":
+            validation_stage = "complete_processing"
+            if str(order.get("payment_status")) == PaymentStatus.COMPLETE.value:
+                idempotency_outcome = "already_paid"
+                response_status = 200
+                return Response(content="OK", status_code=200)
+
+            try:
+                reported_amount = round(float(amount_gross), 2)
+                expected_amount = round(float(order["total"]), 2)
+            except (TypeError, ValueError):
+                failure_reason = "invalid_amount_format"
+                response_status = 400
+                return JSONResponse({"detail": "Invalid PayFast ITN"}, status_code=400)
+
             if abs(reported_amount - expected_amount) > 0.05:
-                logger.error(f"PayFast ITN: amount mismatch order={order_id} expected={expected_amount} got={reported_amount}")
+                failure_reason = "amount_mismatch"
+                response_status = 400
                 await db.orders.update_one(
                     {"_id": order_id},
-                    {"$set": {"payment_status": "amount_mismatch", "updated_at": now}}
+                    {"$set": {"status": OrderStatus.PAYMENT_FAILED.value, "payment_status": PaymentStatus.FAILED.value, "payment_failure_reason": "payfast_amount_mismatch", "updated_at": now}},
                 )
-                return Response(content="OK", status_code=200)
-        except (TypeError, ValueError):
-            logger.warning(f"PayFast ITN: could not parse amount_gross={amount_gross}")
-        
-        await db.orders.update_one(
-            {"_id": order_id},
-            {
-                "$set": {
-                    "status": OrderStatus.PAID,
-                    "payment_status": PaymentStatus.COMPLETE,
-                    "payfast_payment_id": pf_payment_id,
-                    "paid_at": now,
-                    "updated_at": now
-                }
-            }
-        )
-        
-        # Clear cart
-        if order.get("user_id"):
-            await db.carts.update_one({"_id": order["user_id"]}, {"$set": {"items": [], "coupon_code": None}})
-        
-        # Send confirmation email
-        email = order.get("guest_email")
-        if order.get("user_id"):
-            user = await db.users.find_one({"_id": order["user_id"]})
-            email = user["email"] if user else email
-        
-        if email:
-            background_tasks.add_task(send_order_confirmation, order, email)
-            background_tasks.add_task(
-                resend_events.emit_lifecycle_event,
-                resend_events.EventName.order_placed.value,
-                {"email": email},
-                {
-                    "order_number": order["order_number"],
-                    "total": order["total"],
-                    "payment_method": order["payment_method"],
-                },
-                None,
-                None,
-                order.get("user_id"),
-                None,
-                None,
-                "order",
-                order_id
-            )
-            background_tasks.add_task(
-                resend_events.emit_lifecycle_event,
-                resend_events.EventName.order_payment_confirmed.value,
-                {"email": email},
-                {
-                    "order_number": order["order_number"],
-                    "total": order["total"],
-                    "payment_method": order["payment_method"],
-                },
-                None,
-                None,
-                order.get("user_id"),
-                None,
-                None,
-                "order",
-                order_id
-            )
-        background_tasks.add_task(send_admin_order_notification, order)
-    
-    elif payment_status == "CANCELLED":
-        await db.orders.update_one(
-            {"_id": order_id},
-            {"$set": {"payment_status": PaymentStatus.CANCELLED, "updated_at": now}}
-        )
-    
-    elif payment_status == "FAILED":
-        await db.orders.update_one(
-            {"_id": order_id},
-            {"$set": {"payment_status": PaymentStatus.FAILED, "updated_at": now}}
-        )
-    
-    # Store webhook event
-    await db.webhook_events.insert_one({
-        "provider": "payfast",
-        "order_id": order_id,
-        "payload": data,
-        "received_at": now
-    })
-    
-    return Response(content="OK", status_code=200)
+                await db.payment_attempts.update_many(
+                    {"order_id": order_id, "provider": "payfast"},
+                    {"$set": {"status": PaymentAttemptStatus.INVALID_NOTIFICATION.value, "updated_at": now}},
+                )
+                return JSONResponse({"detail": "Invalid PayFast ITN"}, status_code=400)
 
+            await db.orders.update_one(
+                {"_id": order_id},
+                {
+                    "$set": {
+                        "status": OrderStatus.PAID.value,
+                        "payment_status": PaymentStatus.COMPLETE.value,
+                        "payfast_payment_id": pf_payment_id,
+                        "paid_at": now,
+                        "updated_at": now,
+                    }
+                },
+            )
+            await db.payment_attempts.update_many(
+                {"order_id": order_id, "provider": "payfast"},
+                {"$set": {"status": PaymentAttemptStatus.SUCCESSFUL.value, "provider_reference": pf_payment_id, "updated_at": now}},
+            )
 
-@api_router.post("/webhooks/stitch")
-async def stitch_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Stitch payment webhook handler"""
-    body = await request.body()
-    
-    if not verify_stitch_webhook(request, body):
-        logger.warning("Stitch webhook: Invalid signature")
-        return Response(content="OK", status_code=200)
-    
-    import json
-    data = json.loads(body)
-    
-    logger.info(f"Stitch webhook received: {data}")
-    
-    payment_id = data.get("data", {}).get("client", {}).get("paymentInitiationRequest", {}).get("id")
-    status = data.get("data", {}).get("status")
-    
-    if not payment_id:
-        return Response(content="OK", status_code=200)
-    
-    order = await db.orders.find_one({"stitch_payment_id": payment_id})
-    if not order:
-        logger.warning(f"Order not found for Stitch payment: {payment_id}")
-        return Response(content="OK", status_code=200)
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    if status == "PaymentReceived":
-        await db.orders.update_one(
-            {"_id": order["_id"]},
-            {
-                "$set": {
-                    "status": OrderStatus.PAID,
-                    "payment_status": PaymentStatus.COMPLETE,
-                    "paid_at": now,
-                    "updated_at": now
-                }
-            }
-        )
-        
-        # Clear cart and send email
-        if order.get("user_id"):
-            await db.carts.update_one({"_id": order["user_id"]}, {"$set": {"items": [], "coupon_code": None}})
-            user = await db.users.find_one({"_id": order["user_id"]})
-            if user:
-                background_tasks.add_task(send_order_confirmation, order, user["email"])
+            if order.get("user_id"):
+                await db.carts.update_one({"_id": order["user_id"]}, {"$set": {"items": [], "coupon_code": None}})
+
+            email = order.get("guest_email")
+            if order.get("user_id"):
+                user = await db.users.find_one({"_id": order["user_id"]})
+                email = user["email"] if user else email
+
+            if email:
+                background_tasks.add_task(send_order_confirmation, order, email)
                 background_tasks.add_task(
                     resend_events.emit_lifecycle_event,
                     resend_events.EventName.order_placed.value,
-                    {"email": user["email"]},
+                    {"email": email},
                     {
                         "order_number": order["order_number"],
                         "total": order["total"],
@@ -3217,12 +3508,12 @@ async def stitch_webhook(request: Request, background_tasks: BackgroundTasks):
                     None,
                     None,
                     "order",
-                    order["_id"]
+                    order_id,
                 )
                 background_tasks.add_task(
                     resend_events.emit_lifecycle_event,
                     resend_events.EventName.order_payment_confirmed.value,
-                    {"email": user["email"]},
+                    {"email": email},
                     {
                         "order_number": order["order_number"],
                         "total": order["total"],
@@ -3234,61 +3525,54 @@ async def stitch_webhook(request: Request, background_tasks: BackgroundTasks):
                     None,
                     None,
                     "order",
-                    order["_id"]
+                    order_id,
                 )
-        elif order.get("guest_email"):
-            background_tasks.add_task(send_order_confirmation, order, order["guest_email"])
-            background_tasks.add_task(
-                resend_events.emit_lifecycle_event,
-                resend_events.EventName.order_placed.value,
-                {"email": order["guest_email"]},
-                {
-                    "order_number": order["order_number"],
-                    "total": order["total"],
-                    "payment_method": order["payment_method"],
-                },
-                None,
-                None,
-                None,
-                None,
-                None,
-                "order",
-                order["_id"]
+            background_tasks.add_task(send_admin_order_notification, order)
+
+        elif payment_status == "CANCELLED":
+            validation_stage = "cancelled_processing"
+            await db.orders.update_one(
+                {"_id": order_id},
+                {"$set": {"status": OrderStatus.PENDING_PAYMENT.value, "payment_status": PaymentStatus.CANCELLED.value, "updated_at": now}},
             )
-            background_tasks.add_task(
-                resend_events.emit_lifecycle_event,
-                resend_events.EventName.order_payment_confirmed.value,
-                {"email": order["guest_email"]},
-                {
-                    "order_number": order["order_number"],
-                    "total": order["total"],
-                    "payment_method": order["payment_method"],
-                },
-                None,
-                None,
-                None,
-                None,
-                None,
-                "order",
-                order["_id"]
+            await db.payment_attempts.update_many(
+                {"order_id": order_id, "provider": "payfast"},
+                {"$set": {"status": PaymentAttemptStatus.CANCELLED.value, "updated_at": now}},
             )
-        background_tasks.add_task(send_admin_order_notification, order)
-    
-    elif status in ["PaymentCancelled", "PaymentFailed"]:
-        await db.orders.update_one(
-            {"_id": order["_id"]},
-            {"$set": {"payment_status": PaymentStatus.FAILED, "updated_at": now}}
+
+        elif payment_status == "FAILED":
+            validation_stage = "failed_processing"
+            await db.orders.update_one(
+                {"_id": order_id},
+                {"$set": {"status": OrderStatus.PAYMENT_FAILED.value, "payment_status": PaymentStatus.FAILED.value, "updated_at": now}},
+            )
+            await db.payment_attempts.update_many(
+                {"order_id": order_id, "provider": "payfast"},
+                {"$set": {"status": PaymentAttemptStatus.FAILED.value, "updated_at": now}},
+            )
+
+        response_status = 200
+        return Response(content="OK", status_code=200)
+    except HTTPException as exc:
+        failure_reason = "http_exception"
+        response_status = exc.status_code
+        return JSONResponse({"detail": str(exc.detail)}, status_code=exc.status_code)
+    except Exception:
+        failure_reason = "unexpected_internal_error"
+        response_status = 500
+        logger.exception("PayFast ITN unexpected failure")
+        return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
+    finally:
+        logger.info(
+            "PayFast ITN event: timestamp=%s order_id=%s payment_status=%s stage=%s reason=%s response_status=%s idempotency=%s",
+            now,
+            order_id or "",
+            payment_status,
+            validation_stage,
+            failure_reason or "none",
+            response_status,
+            idempotency_outcome,
         )
-    
-    # Store webhook event
-    await db.webhook_events.insert_one({
-        "provider": "stitch",
-        "order_id": order["_id"],
-        "payload": data,
-        "received_at": now
-    })
-    
-    return Response(content="OK", status_code=200)
 
 
 @api_router.post("/webhooks/resend")
@@ -3818,6 +4102,75 @@ async def get_admin_orders(
     }
 
 
+@api_router.get("/admin/reconciliation/payments")
+async def get_payment_reconciliation_report(
+    admin: dict = Depends(get_admin_user),
+    page: int = 1,
+    limit: int = 50,
+):
+    skip = max(page - 1, 0) * limit
+    total = await db.payment_attempts.count_documents({})
+    attempts = await db.payment_attempts.find({}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    rows = []
+    for attempt in attempts:
+        order = await db.orders.find_one({"_id": attempt.get("order_id")}, {"_id": 1, "order_number": 1, "total": 1, "payment_status": 1})
+        webhook = await db.webhook_events.find_one(
+            {
+                "provider": attempt.get("provider"),
+                "order_id": attempt.get("order_id"),
+            },
+            sort=[("received_at", -1)],
+        )
+
+        reported_total = None
+        if webhook and webhook.get("provider") == "payfast":
+            try:
+                reported_total = round(float((webhook.get("payload") or {}).get("amount_gross", 0)), 2)
+            except (TypeError, ValueError):
+                reported_total = None
+
+        expected_total = round(float((order or {}).get("total") or attempt.get("expected_total") or 0), 2)
+        reconciliation_status = "matched"
+        failure_reason = None
+
+        if reported_total is not None and abs(reported_total - expected_total) > 0.05:
+            reconciliation_status = "amount_mismatch"
+            failure_reason = f"expected {expected_total:.2f}, got {reported_total:.2f}"
+        elif attempt.get("status") in {
+            PaymentAttemptStatus.FAILED.value,
+            PaymentAttemptStatus.INVALID_NOTIFICATION.value,
+            PaymentAttemptStatus.CANCELLED.value,
+        }:
+            reconciliation_status = "failed"
+            failure_reason = attempt.get("status")
+
+        rows.append(
+            {
+                "order_number": (order or {}).get("order_number") or attempt.get("order_number"),
+                "order_id": attempt.get("order_id"),
+                "payment_attempt_id": attempt.get("_id"),
+                "provider": attempt.get("provider"),
+                "provider_reference": attempt.get("provider_reference"),
+                "expected_total": expected_total,
+                "reported_total": reported_total,
+                "payment_status": (order or {}).get("payment_status"),
+                "attempt_status": attempt.get("status"),
+                "notification_received_at": (webhook or {}).get("received_at"),
+                "reconciliation_status": reconciliation_status,
+                "failure_reason": failure_reason,
+            }
+        )
+
+    return {
+        "rows": rows,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit,
+    }
+
+
 @api_router.get("/admin/orders/{order_id}")
 async def get_admin_order_detail(order_id: str, admin: dict = Depends(get_admin_user)):
     """Get detailed order information"""
@@ -4253,6 +4606,8 @@ class StoreSettingsUpdate(BaseModel):
     free_shipping_threshold: Optional[float] = None
     vat_rate: Optional[float] = None
     vat_inclusive_prices: Optional[bool] = None
+    tax_registration_status: Optional[str] = None
+    vat_number: Optional[str] = None
     sedgefield_local_delivery_enabled: Optional[bool] = None
     sedgefield_local_delivery_label: Optional[str] = None
     social_links: Optional[dict] = None
@@ -5026,6 +5381,8 @@ async def get_admin_settings(admin: dict = Depends(get_admin_user)):
         "free_shipping_threshold": 399,
         "vat_rate": 0.15,
         "vat_inclusive_prices": True,
+        "tax_registration_status": "registered",
+        "vat_number": "",
         "sedgefield_local_delivery_enabled": True,
         "sedgefield_local_delivery_label": "Sedgefield",
         "social_links": {
@@ -5044,11 +5401,15 @@ async def get_admin_settings(admin: dict = Depends(get_admin_user)):
     settings["seo_defaults"] = {**default_settings.get("seo_defaults", {}), **(settings.get("seo_defaults") or {})}
     settings.pop("_id", None)
     settings["resend_configured"] = resend_is_configured()
-    settings["payfast_configured"] = bool(
-        os.environ.get("PAYFAST_MERCHANT_ID") and
-        os.environ.get("PAYFAST_MERCHANT_ID") != "10000100" and
-        os.environ.get("PAYFAST_MERCHANT_KEY")
-    )
+    try:
+        payfast_config = get_payfast_config()
+        settings["payfast_configured"] = bool(
+            payfast_config.get("enabled")
+            and payfast_config.get("merchant_id_configured")
+            and payfast_config.get("merchant_key_configured")
+        )
+    except PayFastConfigurationError:
+        settings["payfast_configured"] = False
     settings["jwt_custom"] = bool(
         os.environ.get("JWT_SECRET") and
         os.environ.get("JWT_SECRET") != "cape-ember-secret-2024-south-africa"
@@ -5079,6 +5440,8 @@ async def get_public_settings():
         "free_shipping_threshold": settings.get("free_shipping_threshold") if settings.get("free_shipping_threshold") is not None else DEFAULT_FREE_SHIPPING_THRESHOLD,
         "vat_rate": settings.get("vat_rate") if settings.get("vat_rate") is not None else VAT_RATE,
         "vat_inclusive_prices": settings.get("vat_inclusive_prices") if settings.get("vat_inclusive_prices") is not None else True,
+        "tax_registration_status": settings.get("tax_registration_status") or TAX_REGISTRATION_STATUS,
+        "vat_number": settings.get("vat_number") or VAT_NUMBER,
         "sedgefield_local_delivery_enabled": settings.get("sedgefield_local_delivery_enabled") if settings.get("sedgefield_local_delivery_enabled") is not None else True,
         "sedgefield_local_delivery_label": settings.get("sedgefield_local_delivery_label") or "Sedgefield",
         "social_links": social_links
@@ -5226,6 +5589,22 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@api_router.get("/admin/payments/payfast-diagnostics")
+async def payfast_diagnostics(admin: dict = Depends(get_admin_user)):
+    try:
+        payfast_config = get_payfast_config()
+        return {
+            "enabled": bool(payfast_config.get("enabled")),
+            "environment": payfast_config.get("environment"),
+            "process_host": payfast_config.get("process_host"),
+            "merchant_id_configured": bool(payfast_config.get("merchant_id_configured")),
+            "merchant_key_configured": bool(payfast_config.get("merchant_key_configured")),
+            "passphrase_configured": bool(payfast_config.get("passphrase_configured")),
+        }
+    except PayFastConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.get("/health")
 async def k8s_health_check():
     """Kubernetes liveness / readiness probe endpoint. Kept at root path (no /api prefix)
@@ -5367,6 +5746,21 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Seed test coupon and admin user on startup"""
+    try:
+        payfast_config = get_payfast_config()
+        logger.info(
+            "PayFast startup config: enabled=%s environment=%s process_host=%s merchant_id_configured=%s merchant_key_configured=%s passphrase_configured=%s",
+            payfast_config.get("enabled"),
+            payfast_config.get("environment"),
+            payfast_config.get("process_host"),
+            payfast_config.get("merchant_id_configured"),
+            payfast_config.get("merchant_key_configured"),
+            payfast_config.get("passphrase_configured"),
+        )
+    except PayFastConfigurationError as exc:
+        logger.error("PayFast startup config invalid: %s", exc)
+        raise
+
     # Create a test coupon if it doesn't exist
     test_coupon = await db.coupons.find_one({"code": "WELCOME10"})
     if not test_coupon:
@@ -5393,7 +5787,7 @@ async def startup_event():
     
     # Create admin user if it doesn't exist
     admin_email = "admin@capeember.co.za"
-    admin_password = "EmberAdmin2024!"
+    admin_password = os.environ.get("ADMIN_SEED_PASSWORD", "CapeEmber2024!")
     admin_user = await db.users.find_one({"email": admin_email})
     if not admin_user:
         admin_id = str(uuid.uuid4())
@@ -5420,7 +5814,6 @@ async def startup_event():
             {"$set": {
                 "is_admin": True,
                 "admin_role": "owner",
-                "password_hash": hash_password(admin_password)
             }}
         )
         logger.info(f"Updated admin user password: {admin_email}")
@@ -5429,6 +5822,12 @@ async def startup_event():
     await db.analytics_events.create_index([("created_at", -1)])
     await db.analytics_events.create_index([("event_name", 1), ("created_at", -1)])
     await db.analytics_events.create_index([("anonymous_id", 1), ("created_at", -1)])
+    await db.orders.create_index([("order_number", 1)], unique=True)
+    await db.orders.create_index([("payfast_payment_id", 1)], unique=True, sparse=True)
+    await db.payment_attempts.create_index([("order_id", 1), ("provider", 1), ("created_at", -1)])
+    await db.payment_attempts.create_index([("provider", 1), ("provider_reference", 1)], unique=True, sparse=True)
+    await db.webhook_events.create_index([("provider", 1), ("event_key", 1)], unique=True, sparse=True)
+    await db.webhook_events.create_index([("order_id", 1), ("received_at", -1)])
     await resend_events.ensure_event_indexes()
 
 

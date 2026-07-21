@@ -4,9 +4,14 @@ export const DEFAULT_CART_RULES = {
   vatRate: 0.15,
 };
 
-const normalizeText = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const normalizeText = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-export const isSedgefieldLocation = (value) => normalizeText(value).includes('sedgefield');
+export const isSedgefieldLocation = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+  const tokens = normalized.split(' ');
+  return tokens.includes('sedgefield');
+};
 
 export const calculateIncludedVat = (amount, vatRate = DEFAULT_CART_RULES.vatRate) => {
   const safeAmount = Math.max(Number(amount || 0), 0);

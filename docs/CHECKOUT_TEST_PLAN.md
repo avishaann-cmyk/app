@@ -1,59 +1,57 @@
 # Checkout Test Plan
 
-## PayFast Tests
+## Automated Regression Status (Current)
+
+| Suite | Result | Notes |
+|---|---|---|
+| Focused backend tests (PayFast signature + shipping) | Pass | 7 passed |
+| Full backend suite | Pass | 62 passed |
+| Frontend production build | Pass | No blocking warnings/errors |
+
+## PayFast Lifecycle Tests
 
 | # | Test | Expected |
 |---|---|---|
-| 1 | Valid sandbox payment (card) | Order marked paid, confirmation email sent |
-| 2 | Cancelled payment | Payment attempt cancelled, cart retained, order stays pending_payment |
-| 3 | Failed payment | Order marked payment_failed, customer can retry |
-| 4 | Duplicate ITN notification | Second notification ignored (idempotent) |
-| 5 | Invalid ITN signature | 200 OK returned but order not updated |
-| 6 | ITN amount mismatch | Order flagged, not marked paid |
-| 7 | Return page before ITN | Shows "verification in progress" state |
-| 8 | Browser closed after payment | ITN still marks order paid |
-| 9 | Customer refreshes success page | Purchase event fires only once |
+| 1 | Valid sandbox payment | Order transitions to paid after ITN; payment attempt status becomes paid |
+| 2 | Cancelled payment | Order transitions to cancelled or payment_failed per return/webhook state; cancellation endpoint succeeds with token |
+| 3 | Failed payment | Order/payment attempt move to failed state with reason captured |
+| 4 | Duplicate ITN event key | Duplicate event ignored idempotently |
+| 5 | Invalid ITN signature | Event rejected from status mutation path |
+| 6 | Amount mismatch in ITN | Order not marked paid; mismatch logged for reconciliation |
+| 7 | Success page opened before ITN | Status polling remains pending until verified state arrives |
+| 8 | Success page refresh | Purchase event deduplicated per order |
 
-## VAT Tests
-
-| # | Test | Expected |
-|---|---|---|
-| 1 | Add R149 product to cart | Subtotal = R149.00, VAT extracted = R19.43, total NOT increased |
-| 2 | Checkout total = cart total | No VAT added a second time |
-| 3 | PayFast `amount` = server `total` | Identical to 2 decimal places |
-
-## Sedgefield Delivery Tests
-
-| # | Input city | Expected shipping |
-|---|---|---|
-| 1 | Sedgefield | R0.00 — "Free local delivery — Sedgefield" |
-| 2 | sedgefield | R0.00 (case-insensitive) |
-| 3 | " Sedgefield " | R0.00 (whitespace trimmed) |
-| 4 | Cape Town | R50.00 (Western Cape rate) |
-| 5 | (blank city) | Normal rate applied |
-| 6 | outside-Sedgefield | Normal rate (not a free-delivery suburb) |
-| 7 | City changed from Sedgefield to Johannesburg | Recalculates to paid shipping |
-
-## Cart Tests
+## VAT and Total Integrity Tests
 
 | # | Test | Expected |
 |---|---|---|
-| 1 | Add product → correct image shown | Exact product image, not placeholder |
-| 2 | Quantity +1 → line total updates | Correct arithmetic |
-| 3 | Remove item | Item gone, totals updated |
-| 4 | Refresh page | Cart persists via backend session |
-| 5 | Bundle in cart | Bundle artwork shown, 4x250g label, free delivery noted |
+| 1 | Cart subtotal calculation | VAT extracted from inclusive price, not added on top |
+| 2 | Checkout server recomputation | Server total matches persisted payment snapshot |
+| 3 | Provider payload amount | Provider amount equals server order total (2dp precision) |
 
-## Full Journey
+## Sedgefield Shipping Rule Tests
 
-1. Add Fynbos Roast (250g Whole Bean) to cart
-2. Enter non-Sedgefield address → confirm shipping charge shown
-3. Change city to Sedgefield → confirm shipping shows Free
-4. Proceed to checkout
-5. Confirm total is unchanged (no VAT added)
-6. Submit via PayFast sandbox
-7. Complete payment on PayFast sandbox page
-8. Confirm return to /payment/success
-9. Check database: order.status = paid
-10. Check email: confirmation email received
-11. Check analytics: purchase event fired once (not on return URL, on ITN)
+| # | Input | Expected |
+|---|---|---|
+| 1 | Sedgefield token exact/case variants | Free local delivery applies |
+| 2 | Non-Sedgefield city | Zone/threshold shipping applies |
+| 3 | Mid-checkout city change | Shipping recalculates deterministically |
+| 4 | Rule metadata response | shipping_rule field matches applied branch |
+
+## Security and Access Tests
+
+| # | Test | Expected |
+|---|---|---|
+| 1 | Order status without auth/token | Unauthorized |
+| 2 | Order status with valid status_token | Allowed |
+| 3 | Cancel payment without token/ownership | Unauthorized |
+| 4 | Webhook replay event | Idempotent no-op on duplicate key |
+
+## Manual End-to-End Script
+
+1. Create cart with standard product and complete checkout with PayFast selected.
+2. Verify checkout response includes status token and provider metadata.
+3. Complete sandbox payment and observe return page status polling.
+4. Confirm backend order status and payment attempt status transition to paid.
+5. Confirm reconciliation endpoint surfaces transaction with expected state.
+6. Repeat with cancellation path and verify explicit cancel endpoint behavior.

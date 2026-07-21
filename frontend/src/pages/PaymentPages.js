@@ -14,25 +14,32 @@ const PaymentSuccessPage = () => {
   const [orderStatus, setOrderStatus] = useState('pending'); // pending | paid | failed
   const [pollCount, setPollCount] = useState(0);
   const orderId = searchParams.get('order_id') || localStorage.getItem('order_id');
+  const statusToken = searchParams.get('status_token') || (orderId ? localStorage.getItem(`order_status_token_${orderId}`) : null);
 
   const checkOrderStatus = useCallback(async () => {
     if (!orderId) return;
     try {
-      const res = await axios.get(`${API}/orders/${orderId}/status`);
+      const statusParams = statusToken ? `?status_token=${encodeURIComponent(statusToken)}` : '';
+      const res = await axios.get(`${API}/orders/${orderId}/status${statusParams}`);
       const status = res.data?.payment_status || res.data?.status;
       if (status === 'complete' || status === 'paid') {
         setOrderStatus('paid');
-        trackEvent('purchase', { order_id: orderId });
+        const purchaseKey = `purchase_tracked_${orderId}`;
+        if (localStorage.getItem(purchaseKey) !== '1') {
+          trackEvent('purchase', { order_id: orderId });
+          localStorage.setItem(purchaseKey, '1');
+        }
         refreshCart();
         localStorage.removeItem('order_id');
         localStorage.removeItem('whatsapp_link');
-      } else if (status === 'payment_failed' || status === 'cancelled') {
+        localStorage.removeItem(`order_status_token_${orderId}`);
+      } else if (status === 'payment_failed' || status === 'failed' || status === 'cancelled') {
         setOrderStatus('failed');
       }
     } catch {
       // silent — keep polling
     }
-  }, [orderId, refreshCart]);
+  }, [orderId, refreshCart, statusToken]);
 
   useEffect(() => {
     const link = localStorage.getItem('whatsapp_link');
@@ -137,12 +144,25 @@ const PaymentSuccessPage = () => {
 const PaymentCancelPage = () => {
   const [searchParams] = useSearchParams();
   const orderId = searchParams.get('order_id');
+  const statusToken = searchParams.get('status_token') || (orderId ? localStorage.getItem(`order_status_token_${orderId}`) : null);
 
   useEffect(() => {
     trackEvent('payment_cancelled', {
       order_id: orderId || null
     });
-  }, [orderId]);
+
+    const markCancelled = async () => {
+      if (!orderId) return;
+      const tokenPart = statusToken ? `?status_token=${encodeURIComponent(statusToken)}` : '';
+      try {
+        await axios.post(`${API}/orders/${orderId}/payment/cancel${tokenPart}`);
+      } catch (e) {
+        // Do not block UX on cancel-state sync failures.
+      }
+    };
+
+    markCancelled();
+  }, [orderId, statusToken]);
 
   return (
     <div className="min-h-screen pt-20 md:pt-24 flex items-center justify-center">

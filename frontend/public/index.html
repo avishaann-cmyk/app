@@ -1,162 +1,54 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#D05C23" />
-        <meta name="google-site-verification" content="%REACT_APP_GOOGLE_SITE_VERIFICATION%" />
-        <!-- Favicon stack: SVG (modern browsers), PNG fallbacks -->
-        <link rel="icon" href="%PUBLIC_URL%/favicon.svg" type="image/svg+xml" />
-        <link rel="icon" href="%PUBLIC_URL%/favicon.png" type="image/png" sizes="32x32" />
-        <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" sizes="180x180" />
-        <link rel="manifest" href="%PUBLIC_URL%/site.webmanifest" />
-        <!-- Resource hints -->
-        <link rel="dns-prefetch" href="//fonts.googleapis.com" />
-        <link rel="dns-prefetch" href="//www.googletagmanager.com" />
-        <link rel="preconnect" href="https://www.googletagmanager.com" crossorigin />
-        
-        <!-- Primary Meta Tags -->
-        <title>Cape Ember Coffee Co. | Premium South African Coffee</title>
-        <meta name="title" content="Cape Ember Coffee Co. | Premium South African Coffee" />
-        <meta name="description" content="Premium small-batch coffee inspired by South African landscapes. Experience the beauty of the Cape Peninsula, Garden Route, and Karoo in every cup. Nationwide delivery." />
-        <meta name="keywords" content="South African coffee, premium coffee, Cape Town coffee, small batch coffee, artisan coffee, coffee subscription, coffee beans, Fynbos Roast, Garden Route Blend" />
-        <meta name="author" content="Cape Ember Coffee Co." />
-        <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://capeembercoffee.co.za" />
-        
-        <!-- Open Graph / Facebook -->
-        <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://capeembercoffee.co.za" />
-        <meta property="og:title" content="Cape Ember Coffee Co. | Premium South African Coffee" />
-        <meta property="og:description" content="Premium small-batch coffee inspired by South African landscapes. Experience the beauty of the Cape in every cup." />
-        <meta property="og:image" content="https://customer-assets.emergentagent.com/job_axis-creator/artifacts/s93qex0b_77A74D65-C0D2-4A33-9348-2B0D5FE7082C.jpeg" />
-        <meta property="og:site_name" content="Cape Ember Coffee Co." />
-        <meta property="og:locale" content="en_ZA" />
-        
-        <!-- Twitter -->
-        <meta property="twitter:card" content="summary_large_image" />
-        <meta property="twitter:url" content="https://capeembercoffee.co.za" />
-        <meta property="twitter:title" content="Cape Ember Coffee Co. | Premium South African Coffee" />
-        <meta property="twitter:description" content="Premium small-batch coffee inspired by South African landscapes. Experience the beauty of the Cape in every cup." />
-        <meta property="twitter:image" content="https://customer-assets.emergentagent.com/job_axis-creator/artifacts/s93qex0b_77A74D65-C0D2-4A33-9348-2B0D5FE7082C.jpeg" />
-        
-        <!-- Fonts -->
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
-        
-        <!-- Schema.org structured data -->
-        <script type="application/ld+json">
-        {
-            "@context": "https://schema.org",
-            "@type": "CoffeeStore",
-            "name": "Cape Ember Coffee Co.",
-            "description": "Premium small-batch coffee inspired by South African landscapes",
-            "url": "https://capeembercoffee.co.za",
-            "logo": "https://capeembercoffee.co.za/favicon-512.png",
-            "address": {
-                "@type": "PostalAddress",
-                "addressCountry": "ZA",
-                "addressRegion": "Western Cape"
-            },
-            "priceRange": "R149 - R599",
-            "paymentAccepted": ["Credit Card", "Debit Card"],
-            "openingHours": "Mo-Su 00:00-23:59",
-            "sameAs": [
-                "https://www.instagram.com/capeembercoffee",
-                "https://www.facebook.com/capeembercoffee"
-            ],
-            "hasOfferCatalog": {
-                "@type": "OfferCatalog",
-                "name": "Coffee Collection",
-                "itemListElement": [
-                    {
-                        "@type": "Offer",
-                        "itemOffered": {
-                            "@type": "Product",
-                            "name": "Fynbos Roast",
-                            "description": "Medium roast with nutty sweetness"
-                        }
-                    },
-                    {
-                        "@type": "Offer",
-                        "itemOffered": {
-                            "@type": "Product",
-                            "name": "Garden Route Blend",
-                            "description": "Smooth house blend with cocoa notes"
-                        }
-                    },
-                    {
-                        "@type": "Offer",
-                        "itemOffered": {
-                            "@type": "Product",
-                            "name": "Ember Reserve",
-                            "description": "Bold dark roast with chocolate intensity"
-                        }
-                    },
-                    {
-                        "@type": "Offer",
-                        "itemOffered": {
-                            "@type": "Product",
-                            "name": "Karoo Horizon",
-                            "description": "Delicate light roast with fruity florals"
-                        }
-                    }
-                ]
-            }
-        }
-        </script>
-        <!--
-        manifest.json provides metadata used when your web app is installed on a
-        user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-        -->
-        <!--
-        Notice the use of %PUBLIC_URL% in the tags above.
-        It will be replaced with the URL of the `public` folder during the build.
-        Only files inside the `public` folder can be referenced from the HTML.
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#D05C23" />
+    <title>Cape Ember Coffee Co.</title>
+    <meta name="title" content="Cape Ember Coffee Co. | Premium South African Coffee" />
+    <meta
+      name="description"
+      content="Premium small-batch coffee inspired by South African landscapes. Crafted with trusted roasting partners and delivered nationwide."
+    />
+    <meta
+      name="keywords"
+      content="South African coffee, premium coffee, small batch coffee, Cape Ember Coffee Co., Garden Route coffee"
+    />
+    <meta name="author" content="Cape Ember Coffee Co." />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="https://capeembercoffee.co.za" />
 
-        Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-        work correctly both with client-side routing and a non-root public URL.
-        Learn how to configure a non-root public URL by running `npm run build`.
-        -->
-    </head>
-    <body>
-        <noscript>
-          <div style="font-family:Georgia,serif;max-width:800px;margin:60px auto;padding:0 24px;color:#2C1A12">
-            <h1 style="font-size:2.5rem;font-weight:400;margin-bottom:1rem">Cape Ember Coffee Co.</h1>
-            <p style="font-size:1.1rem;line-height:1.7;margin-bottom:1rem">
-              Premium small-batch coffee inspired by the landscapes of South Africa.
-              Crafted with trusted roasting partners and delivered nationwide.
-            </p>
-            <h2 style="font-size:1.5rem;font-weight:400;margin:2rem 0 1rem">Our Coffees</h2>
-            <ul style="list-style:none;padding:0;line-height:2">
-              <li><strong>Fynbos Roast</strong> &mdash; Medium roast. Smooth, nutty and perfectly balanced.</li>
-              <li><strong>Garden Route Blend</strong> &mdash; House blend. Smooth cocoa with gentle citrus.</li>
-              <li><strong>Karoo Horizon</strong> &mdash; Light roast. Blueberry, wildflower, honey finish.</li>
-              <li><strong>Ember Reserve</strong> &mdash; Dark roast. Rich dark chocolate, full-bodied intensity.</li>
-            </ul>
-            <p style="margin-top:2rem">
-              <a href="/shop" style="color:#D05C23">Shop Coffee</a> &bull;
-              <a href="/about" style="color:#D05C23">Our Story</a> &bull;
-              <a href="/contact" style="color:#D05C23">Contact Us</a>
-            </p>
-            <p style="font-size:0.9rem;color:#6B5048;margin-top:1rem">
-              &copy; Cape Ember Coffee Co. &bull; Cape Town, South Africa &bull; hello@capeembercoffee.co.za
-            </p>
-          </div>
-        </noscript>
-        <div id="root"></div>
-        <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://capeembercoffee.co.za" />
+    <meta property="og:title" content="Cape Ember Coffee Co. | Premium South African Coffee" />
+    <meta
+      property="og:description"
+      content="Premium small-batch coffee inspired by South African landscapes."
+    />
+    <meta property="og:image" content="%PUBLIC_URL%/assets/cape-ember/cape-ember-fynbos-lifestyle.jpeg" />
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cape Ember Coffee Co. | Premium South African Coffee" />
+    <meta
+      name="twitter:description"
+      content="Premium small-batch coffee inspired by South African landscapes."
+    />
+    <meta name="twitter:image" content="%PUBLIC_URL%/assets/cape-ember/cape-ember-fynbos-lifestyle.jpeg" />
 
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
-        
-    </body>
+    <link rel="icon" href="%PUBLIC_URL%/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="%PUBLIC_URL%/site.webmanifest" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Outfit:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <noscript>JavaScript is required to run Cape Ember Coffee Co.</noscript>
+    <div id="root"></div>
+  </body>
 </html>
